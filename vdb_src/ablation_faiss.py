@@ -165,7 +165,7 @@ def evaluate_condition(
             skipped_src_missing += 1
             continue
 
-        filtered = fetch_top_k(
+        results = fetch_top_k(
             cfg=cfg,
             src_payload=payload,
             tgt_db=tgt_db,
@@ -174,6 +174,7 @@ def evaluate_condition(
             top_k=max_k,
             query_mode=query_mode,
         )
+        filtered = [tid for tid, _ in results]
 
         total += 1
 

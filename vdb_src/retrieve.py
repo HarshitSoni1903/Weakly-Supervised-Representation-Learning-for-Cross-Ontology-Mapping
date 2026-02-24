@@ -134,9 +134,9 @@ def load_collection(cfg: BuildConfig, name: str, project_root: Path) -> FaissCol
     return FaissCollection(cdir)
 
 
-# -------------------------
+# ------------------------------------------
 # MAIN RETRIEVAL FUNCTION
-# -------------------------
+# ------------------------------------------
 
 def fetch_top_k(
     cfg: BuildConfig,
@@ -146,7 +146,11 @@ def fetch_top_k(
     tokenizer,
     top_k: int,
     query_mode: str,
-) -> List[str]:
+) -> List[Tuple[str, float]]:
+    """
+    Retrieval function (single source concept) that ALWAYS returns (target_id, score).
+    Logic is identical to your current fetch_top_k_with_scores.
+    """
 
     device = resolve_device(cfg.device)
 
@@ -157,12 +161,7 @@ def fetch_top_k(
     if query_mode == "label_only":
         qtext = f"Label: {label}"
     elif query_mode == "full_src":
-        qtext = build_embedding_text(
-            label,
-            definition,
-            list(synonyms),
-            cfg.synonym_cap,
-        )
+        qtext = build_embedding_text(label, definition, list(synonyms), cfg.synonym_cap)
     else:
         raise ValueError(query_mode)
 
@@ -181,11 +180,10 @@ def fetch_top_k(
         if tgt_db.cdir.name == k:
             tgt_prefix = v["id_prefix"]
             break
-
     if tgt_prefix is None:
         raise RuntimeError("Could not infer id_prefix for target collection")
 
-    filtered: List[str] = []
+    filtered: List[Tuple[str, float]] = []
 
     while True:
         scores, idxs = tgt_db.search(qvec, min(limit, tgt_db.count()))
@@ -200,7 +198,8 @@ def fetch_top_k(
                 continue
             if s < threshold:
                 continue
-            filtered.append(pid)
+
+            filtered.append((pid, float(s)))
             if len(filtered) >= need:
                 break
 
