@@ -3,3 +3,4 @@ db/
 data/
 models/
 .DS_Store
+vdb_src/__pycache__/

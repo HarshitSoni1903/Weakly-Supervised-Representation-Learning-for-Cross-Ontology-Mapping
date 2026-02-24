@@ -13,7 +13,7 @@ class BuildConfig:
     mp_owl_path: str = "data/mp.owl"
 
     # Models
-    # base_model_name: str = "cambridgeltl/SapBERT-from-PubMedBERT-fulltext"
+    base_model_name: str = "cambridgeltl/SapBERT-from-PubMedBERT-fulltext"
     ft_model_path: str = "models/sap_FT"  # local path
 
     # Embedding
@@ -29,8 +29,8 @@ class BuildConfig:
 
 
 COLLECTIONS: Dict[str, Dict[str, str]] = {
-    # "hp_base": {"source": "owl", "prefix": "hp", "model": "base", "id_prefix": "HP_"},
-    # "mp_base": {"source": "owl", "prefix": "mp", "model": "base", "id_prefix": "MP_"},
+    "hp_base": {"source": "owl", "prefix": "hp", "model": "base", "id_prefix": "HP_"},
+    "mp_base": {"source": "owl", "prefix": "mp", "model": "base", "id_prefix": "MP_"},
     "hp_ft":   {"source": "owl", "prefix": "hp", "model": "ft",   "id_prefix": "HP_"},
     "mp_ft":   {"source": "owl", "prefix": "mp", "model": "ft",   "id_prefix": "MP_"},
 }
