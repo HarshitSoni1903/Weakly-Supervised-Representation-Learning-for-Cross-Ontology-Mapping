@@ -184,13 +184,15 @@ def fetch_top_k(
     limit = max(need * overfetch_mult, need)
     max_limit = need * max_limit_mult
 
-    tgt_prefix = None
-    for k, v in COLLECTIONS.items():
-        if tgt_db.cdir.name == k:
-            tgt_prefix = v["id_prefix"]
-            break
-    if tgt_prefix is None:
-        raise RuntimeError("Could not infer id_prefix for target collection")
+    spec = COLLECTIONS.get(tgt_db.cdir.name, {})
+    prefixes = spec.get("id_prefixes") or spec.get("id_prefix") or []
+    if isinstance(prefixes, str):
+        prefixes = [prefixes]
+
+    def ok_prefix(pid: str) -> bool:
+        if not prefixes:
+            return True
+        return any(pid.startswith(p) for p in prefixes)
 
     filtered: List[Tuple[str, float]] = []
 
@@ -203,7 +205,7 @@ def fetch_top_k(
             pid = tgt_db.id_at_pos(ix)
             if not pid:
                 continue
-            if not pid.startswith(tgt_prefix):
+            if not ok_prefix(pid):
                 continue
             if s < threshold:
                 continue

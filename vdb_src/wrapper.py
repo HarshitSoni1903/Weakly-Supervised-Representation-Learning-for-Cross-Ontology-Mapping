@@ -2,6 +2,7 @@ from __future__ import annotations
 import os
 import platform
 
+
 # ---- IMPORTANT: set OpenMP env BEFORE importing torch/faiss/transformers ----
 if platform.system() == "Darwin":
     os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
@@ -13,7 +14,7 @@ from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
 import csv
 
-from config import BuildConfig
+from config import BuildConfig, COLLECTIONS
 from retrieve import resolve_device, load_encoder, load_collection, fetch_top_k
 
 
@@ -22,8 +23,21 @@ def canonicalize_id(x: str) -> str:
 
 
 def infer_collection_from_id(src_id: str) -> str:
-    # HP:0001627 -> hp, MP:0001234 -> mp
-    return str(src_id).split(":")[0].lower()
+    cid = canonicalize_id(src_id)
+
+    # Prefer config prefix matching
+    for cname, spec in COLLECTIONS.items():
+        prefixes = spec.get("id_prefixes") or spec.get("id_prefix") or []
+        if isinstance(prefixes, str):
+            prefixes = [prefixes]
+        if any(cid.startswith(p) for p in prefixes):
+            return cname
+
+    # Fallback: old HP:000... style namespace token
+    if ":" in src_id:
+        return str(src_id).split(":")[0].lower()
+
+    raise ValueError(f"Could not infer collection for id={src_id}")
 
 
 def fill_payload_from_id(

@@ -9,11 +9,8 @@ class BuildConfig:
     db_dir: str = "db"          # location for FAISS + metadata
     data_dir: str = "data"      # OWL files
 
-    hp_owl_path: str = "data/hp.owl"
-    mp_owl_path: str = "data/mp.owl"
-
     # Models
-    # base_model_name: str = "cambridgeltl/SapBERT-from-PubMedBERT-fulltext"
+    base_model_name: str = "cambridgeltl/SapBERT-from-PubMedBERT-fulltext"
     ft_model_path: str = "models/sap_FT"  # local path
 
     # Embedding
@@ -28,9 +25,53 @@ class BuildConfig:
     max_limit_mult: int = 20  # max_limit = top_k * max_limit_mult
 
 
-COLLECTIONS: Dict[str, Dict[str, str]] = {
-    # "hp_base": {"source": "owl", "prefix": "hp", "model": "base", "id_prefix": "HP_"},
-    # "mp_base": {"source": "owl", "prefix": "mp", "model": "base", "id_prefix": "MP_"},
-    "hp":   {"source": "owl", "prefix": "hp", "model": "ft",   "id_prefix": "HP_"},
-    "mp":   {"source": "owl", "prefix": "mp", "model": "ft",   "id_prefix": "MP_"},
+COLLECTIONS: Dict[str, Dict[str, object]] = {
+    "hp":   {
+        "source": "owl", 
+        "prefix": "hp", 
+        "model": "ft",
+        "owl_path": "hp_enriched.owl", 
+        "id_prefixes": ["HP_"]},
+    "mp":   {
+        "source": "owl", 
+        "prefix": "mp", 
+        "model": "ft",
+        "owl_path": "mp_enriched.owl", 
+        "id_prefixes": ["MP_"]},
+    "mondo": {
+        "source": "owl",
+        "model": "ft",
+        "owl_path": "mondo.owl",
+        "id_prefixes": ["MONDO_"],
+    },
+    "mesh": {
+        "source": "owl",
+        "model": "ft",
+        "owl_path": "mesh_disease_subset.owl",
+        "id_prefixes": ["mesh_"],
+    },
+    "hp_base":   {
+        "source": "owl", 
+        "prefix": "hp", 
+        "model": "base",
+        "owl_path": "hp_enriched.owl", 
+        "id_prefixes": ["HP_"]},
+    "mp_base":   {
+        "source": "owl", 
+        "prefix": "mp", 
+        "model": "base",
+        "owl_path": "mp_enriched.owl", 
+        "id_prefixes": ["MP_"]},
+    "mondo_base": {
+        "source": "owl",
+        "model": "base",
+        "owl_path": "mondo.owl",
+        "id_prefixes": ["MONDO_"],
+    },
+    "mesh_base": {
+        "source": "owl",
+        "model": "base",
+        "owl_path": "mesh_disease_subset.owl",
+        "id_prefixes": ["mesh_"],
+    },
 }

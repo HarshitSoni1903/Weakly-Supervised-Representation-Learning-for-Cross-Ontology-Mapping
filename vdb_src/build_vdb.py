@@ -86,13 +86,22 @@ def embed_batch(texts: List[str], tokenizer, model, device: torch.device, max_le
 
 
 def _owl_class_id(cls) -> str:
+    if hasattr(cls, "oboInOwl_id"):
+        v = _first_str(getattr(cls, "oboInOwl_id", None))
+        if v:
+            return canonicalize_id(v)
+
+    iri = str(getattr(cls, "iri", "") or "")
+    tail = iri.split("#")[-1].rsplit("/", 1)[-1].strip()
+    if tail:
+        if "id.nlm.nih.gov/mesh/" in iri or "obo/mesh#" in iri or "purl.obolibrary.org/obo/mesh" in iri:
+            return canonicalize_id(f"mesh:{tail}")
+
     name = getattr(cls, "name", None)
     if name:
         return canonicalize_id(name)
-    iri = str(getattr(cls, "iri", "") or "")
-    frag = iri.split("#")[-1].rsplit("/", 1)[-1]
-    return canonicalize_id(frag)
 
+    return canonicalize_id(tail)
 
 def _first_str(v) -> str:
     if v is None:
@@ -234,17 +243,26 @@ def main() -> None:
     cfg = BuildConfig()
     device = resolve_device(cfg.device)
 
-    # load OWLs once (same OWLs used for base + ft)
-    hp_concepts = load_owl_concepts(cfg.hp_owl_path)
-    mp_concepts = load_owl_concepts(cfg.mp_owl_path)
-
-    # choose which collections to build
     cols = args.collections or list(COLLECTIONS.keys())
     for c in cols:
         if c not in COLLECTIONS:
             raise SystemExit(f"Unknown collection: {c}")
 
-    # group by model_key so we load each model once
+    # cache OWL parse results by owl_path
+    owl_cache: Dict[str, List[Dict]] = {}
+
+    def get_concepts_for_collection(cname: str) -> List[Dict]:
+        owl_path = str(COLLECTIONS[cname]["owl_path"])
+
+        p = Path(owl_path)
+        if not p.is_absolute() and not p.exists():
+            p = Path(cfg.data_dir) / owl_path
+
+        key = str(p)
+        if key not in owl_cache:
+            owl_cache[key] = load_owl_concepts(str(p))
+        return owl_cache[key]
+
     want_base = any(COLLECTIONS[c]["model"] == "base" for c in cols)
     want_ft = any(COLLECTIONS[c]["model"] == "ft" for c in cols)
 
@@ -257,8 +275,7 @@ def main() -> None:
         for c in cols:
             if COLLECTIONS[c]["model"] != "base":
                 continue
-            prefix = COLLECTIONS[c]["prefix"]
-            concepts = hp_concepts if prefix == "hp" else mp_concepts
+            concepts = get_concepts_for_collection(c)
             _write_collection(cfg, c, list(concepts), tok, mdl, device)
 
         del tok, mdl
@@ -274,14 +291,12 @@ def main() -> None:
         for c in cols:
             if COLLECTIONS[c]["model"] != "ft":
                 continue
-            prefix = COLLECTIONS[c]["prefix"]
-            concepts = hp_concepts if prefix == "hp" else mp_concepts
+            concepts = get_concepts_for_collection(c)
             _write_collection(cfg, c, list(concepts), tok, mdl, device)
 
         del tok, mdl
         if device.type == "cuda":
             torch.cuda.empty_cache()
-
 
 if __name__ == "__main__":
     main()

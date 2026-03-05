@@ -4,3 +4,5 @@ data/
 models/
 .DS_Store
 vdb_src/__pycache__/
+*.pdf
+*.ipynb
