@@ -47,7 +47,7 @@ COLLECTIONS: Dict[str, Dict[str, object]] = {
     "mesh": {
         "source": "owl",
         "model": "ft",
-        "owl_path": "mesh_disease_subset.owl",
+        "owl_path": "mesh_diseas.owl",
         "id_prefixes": ["mesh_"],
     },
     "hp_base":   {
@@ -71,7 +71,19 @@ COLLECTIONS: Dict[str, Dict[str, object]] = {
     "mesh_base": {
         "source": "owl",
         "model": "base",
-        "owl_path": "mesh_disease_subset.owl",
+        "owl_path": "mesh_disease.owl",
         "id_prefixes": ["mesh_"],
+    },
+    "doid_base": {
+        "source": "owl",
+        "model": "base",
+        "owl_path": "doid.owl",
+        "id_prefixes": ["DOID_"],
+    },
+    "doid": {
+        "source": "owl",
+        "model": "ft",
+        "owl_path": "doid.owl",
+        "id_prefixes": ["DOID_"],
     },
 }

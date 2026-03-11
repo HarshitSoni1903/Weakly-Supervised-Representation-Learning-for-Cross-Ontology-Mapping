@@ -1,4 +1,3 @@
-# faiss_vdb/retrieve.py
 # ---- IMPORTANT: set OpenMP env BEFORE importing torch ----
 import os
 import platform
@@ -21,9 +20,6 @@ from transformers import AutoTokenizer, AutoModel
 from config import BuildConfig, COLLECTIONS
 
 
-# -------------------------
-# Text helpers
-# -------------------------
 
 def _clean(s: str) -> str:
     return " ".join(str(s).strip().split())
@@ -94,9 +90,6 @@ def load_encoder(model_name: str, device: torch.device):
     return tok, mdl
 
 
-# -------------------------
-# FAISS wrapper
-# -------------------------
 
 class FaissCollection:
     def __init__(self, cdir: Path):
@@ -143,9 +136,6 @@ def load_collection(cfg: BuildConfig, name: str, project_root: Path) -> FaissCol
     return FaissCollection(cdir)
 
 
-# ------------------------------------------
-# MAIN RETRIEVAL FUNCTION
-# ------------------------------------------
 
 def fetch_top_k(
     cfg: BuildConfig,
