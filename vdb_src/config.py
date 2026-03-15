@@ -108,6 +108,24 @@ COLLECTIONS: Dict[str, Dict] = {
         "owl_path": "doid.owl",
         "id_prefixes": ["DOID_"],
     },
+    "chebi": {
+        "source": "owl",
+        "model": "ft",
+        "owl_path": "chebi.owl",
+        "id_prefixes": ["CHEBI_"],
+    },
+    "mesh_full_base": {
+        "source": "owl",
+        "model": "base",
+        "owl_path": "mesh.owl",
+        "id_prefixes": ["mesh_"],
+    },
+    "mesh_full": {
+        "source": "owl",
+        "model": "ft",
+        "owl_path": "mesh.owl",
+        "id_prefixes": ["mesh_"],
+    },
 }
 
 
