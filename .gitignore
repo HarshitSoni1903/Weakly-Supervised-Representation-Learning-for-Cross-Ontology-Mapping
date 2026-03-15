@@ -1,8 +1,11 @@
 ablation_study/
+ablation_study_old/
 db/
+db_old/
 data/
 models/
+logs/
 .DS_Store
 vdb_src/__pycache__/
 *.pdf
-*.ipynb
+*.ipynby

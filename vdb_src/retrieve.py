@@ -1,211 +1,193 @@
-# ---- IMPORTANT: set OpenMP env BEFORE importing torch ----
-import os
-import platform
+"""
+Retrieve matching concepts from a target collection.
+Supports single queries and batch queries with optional CSV output.
 
-if platform.system() == "Darwin":
-    os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
-    os.environ.setdefault("OMP_NUM_THREADS", "1")
-    os.environ.setdefault("MKL_NUM_THREADS", "1")
-    os.environ.setdefault("VECLIB_MAXIMUM_THREADS", "1")
+Usage:
+    # single label lookup
+    python retrieve.py --label "Abnormal heart morphology" --tgt mesh --top_k 5
 
-from typing import List, Dict, Optional, Tuple
-from pathlib import Path
+    # batch from file
+    python retrieve.py --input queries.tsv --tgt mesh --top_k 50 --out results.tsv
+
+    # by id (fills label/def/syns from source collection automatically)
+    python retrieve.py --id "HP:0001627" --tgt mp --top_k 10
+"""
+from __future__ import annotations
+
+import argparse
+import csv
 import json
-import numpy as np
-import torch
-import torch.nn.functional as F
-import faiss
-from transformers import AutoTokenizer, AutoModel
+from pathlib import Path
+from typing import Dict, List, Optional
+
+from tqdm import tqdm
 
 from config import BuildConfig, COLLECTIONS
+from utils import (
+    get_logger,
+    resolve_device,
+    load_encoder,
+    free_encoder,
+    load_collection,
+    resolve_payload,
+    fetch_top_k,
+    write_results_csv,
+    canonicalize_id,
+    normalize_prefix,
+)
 
 
-
-def _clean(s: str) -> str:
-    return " ".join(str(s).strip().split())
-
-
-def build_embedding_text(label: str, definition: str, synonyms: List[str], synonym_cap: int) -> str:
-    label = _clean(label)
-    definition = _clean(definition) if definition else ""
-
-    syns: List[str] = []
-    seen = set()
-    for s in synonyms or []:
-        s2 = _clean(s)
-        if not s2 or s2 == label or s2 in seen:
-            continue
-        syns.append(s2)
-        seen.add(s2)
-        if len(syns) >= synonym_cap:
-            break
-
-    parts = [f"Label: {label}"]
-    if definition:
-        parts.append(f"Definition: {definition}")
-    if syns:
-        parts.append("Synonyms: " + "; ".join(syns))
-    return "\n".join(parts)
+def _infer_src_collection(cid: str) -> Optional[str]:
+    """Try to figure out which collection an id belongs to based on prefix."""
+    for cname, spec in COLLECTIONS.items():
+        raw_prefixes = spec.get("id_prefixes") or []
+        if isinstance(raw_prefixes, str):
+            raw_prefixes = [raw_prefixes]
+        for p in raw_prefixes:
+            if cid.startswith(normalize_prefix(p)):
+                return cname
+    return None
 
 
-def resolve_device(pref: str) -> torch.device:
-    if pref == "cpu":
-        return torch.device("cpu")
-    if pref == "cuda" and torch.cuda.is_available():
-        return torch.device("cuda")
-    if pref == "auto":
-        if torch.cuda.is_available():
-            return torch.device("cuda")
-        if torch.backends.mps.is_available():
-            return torch.device("mps")
-        return torch.device("cpu")
-    return torch.device("cpu")
-
-
-def mean_pool(last_hidden_state, attention_mask):
-    mask = attention_mask.unsqueeze(-1).type_as(last_hidden_state)
-    summed = (last_hidden_state * mask).sum(dim=1)
-    counts = mask.sum(dim=1).clamp(min=1e-9)
-    return summed / counts
-
-
-@torch.no_grad()
-def embed_one(text: str, tok, model, device: torch.device, max_length: int) -> np.ndarray:
-    enc = tok(
-        [text],
-        padding=True,
-        truncation=True,
-        max_length=max_length,
-        return_tensors="pt",
-    ).to(device)
-    out = model(**enc)
-    pooled = mean_pool(out.last_hidden_state, enc["attention_mask"])
-    pooled = F.normalize(pooled, p=2, dim=1)
-    return pooled.detach().cpu().numpy().astype("float32")
-
-
-def load_encoder(model_name: str, device: torch.device):
-    tok = AutoTokenizer.from_pretrained(model_name)
-    mdl = AutoModel.from_pretrained(model_name).to(device).eval()
-    return tok, mdl
-
-
-
-class FaissCollection:
-    def __init__(self, cdir: Path):
-        self.cdir = cdir
-        self.index = faiss.read_index(str(cdir / "index.faiss"))
-        self.meta_path = cdir / "meta.jsonl"
-        self.id2pos = json.loads((cdir / "id2pos.json").read_text(encoding="utf-8"))
-
-        self.pos2id: List[str] = []
-        with open(self.meta_path, "r", encoding="utf-8") as f:
-            for line in f:
-                try:
-                    self.pos2id.append(str(json.loads(line).get("id", "")))
-                except Exception:
-                    self.pos2id.append("")
-
-    def count(self) -> int:
-        return int(self.index.ntotal)
-
-    def get_payload_by_id(self, cid: str) -> Optional[Dict]:
-        pos = self.id2pos.get(cid)
-        if pos is None:
-            return None
-        with open(self.meta_path, "r", encoding="utf-8") as f:
-            for i, line in enumerate(f):
-                if i == pos:
-                    return json.loads(line)
-        return None
-
-    def search(self, qvec: np.ndarray, limit: int) -> Tuple[np.ndarray, np.ndarray]:
-        scores, idxs = self.index.search(qvec, limit)
-        return scores[0], idxs[0]
-
-    def id_at_pos(self, pos: int) -> str:
-        if pos < 0 or pos >= len(self.pos2id):
-            return ""
-        return self.pos2id[pos]
-
-
-def load_collection(cfg: BuildConfig, name: str, project_root: Path) -> FaissCollection:
-    cdir = project_root / cfg.db_dir / name
-    if not cdir.exists():
-        raise SystemExit(f"Missing collection dir: {cdir}")
-    return FaissCollection(cdir)
-
-
-
-def fetch_top_k(
+def retrieve_batch(
+    queries: List[Dict],
+    tgt_collection: str,
     cfg: BuildConfig,
-    src_payload: dict,
-    tgt_db: FaissCollection,
-    model,
-    tokenizer,
-    top_k: int,
-    query_mode: str,
-) -> List[Tuple[str, float]]:
+    top_k: int = 1,
+    query_mode: str = "full_src",
+    src_collection: Optional[str] = None,
+    out_csv: Optional[str] = None,
+    logger=None,
+) -> List[Dict]:
     """
-    Retrieval function (single source concept) that ALWAYS returns (target_id, score).
-    Logic is identical to your current fetch_top_k_with_scores.
+    Run retrieval for a list of query dicts.
+    Returns list of {src_id, src_label, matches: [{id, label, definition, synonyms, score, rank}]}
     """
-
     device = resolve_device(cfg.device)
+    tok, mdl = load_encoder(cfg.ft_model_path, device)
 
-    label = str(src_payload.get("label", "") or "").strip()
-    definition = str(src_payload.get("definition", "") or "").strip()
-    synonyms = src_payload.get("synonyms", []) or []
+    tgt_db = load_collection(cfg, tgt_collection)
 
-    if query_mode == "label_only":
-        qtext = f"Label: {label}"
-    elif query_mode == "full_src":
-        qtext = build_embedding_text(label, definition, list(synonyms), cfg.synonym_cap)
+    # optionally load source db for payload enrichment
+    src_db = None
+    src_db_cache: Dict[str, object] = {}
+    if src_collection:
+        src_db = load_collection(cfg, src_collection)
+
+    all_results: List[Dict] = []
+
+    for q in tqdm(queries, desc=f"Retrieving -> {tgt_collection}", unit="query"):
+        # if src_collection not given explicitly, try to infer from id
+        effective_src_db = src_db
+        if effective_src_db is None and q.get("id"):
+            inferred = _infer_src_collection(q["id"])
+            if inferred:
+                if inferred not in src_db_cache:
+                    try:
+                        src_db_cache[inferred] = load_collection(cfg, inferred)
+                    except SystemExit:
+                        src_db_cache[inferred] = None
+                effective_src_db = src_db_cache[inferred]
+
+        payload = resolve_payload(q, effective_src_db)
+
+        if not payload["label"]:
+            if logger:
+                logger.warning(f"Skipping query with no label: {q}")
+            continue
+
+        matches = fetch_top_k(
+            cfg=cfg,
+            src_payload=payload,
+            tgt_db=tgt_db,
+            model=mdl,
+            tokenizer=tok,
+            top_k=top_k,
+            query_mode=query_mode,
+            device=device,
+        )
+
+        for rank, m in enumerate(matches, 1):
+            m["rank"] = rank
+
+        all_results.append({
+            "src_id": payload.get("id", ""),
+            "src_label": payload.get("label", ""),
+            "matches": matches,
+        })
+
+    free_encoder(tok, mdl, device)
+
+    if out_csv:
+        write_results_csv(all_results, out_csv)
+        if logger:
+            logger.info(f"Results written to {out_csv}")
+
+    return all_results
+
+
+def _load_queries_from_file(path: str) -> List[Dict]:
+    """Load queries from a TSV/CSV file. Expects columns: id, label, definition, synonyms."""
+    queries = []
+    delim = "," if path.endswith(".csv") else "\t"
+    with open(path, "r", encoding="utf-8") as f:
+        reader = csv.DictReader(f, delimiter=delim)
+        for row in reader:
+            queries.append({
+                "id": row.get("id", "").strip(),
+                "label": row.get("label", "").strip(),
+                "definition": row.get("definition", "").strip(),
+                "synonyms": [s.strip() for s in row.get("synonyms", "").split(";") if s.strip()],
+            })
+    return queries
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser(description="Retrieve ontology mappings from a target collection.")
+    ap.add_argument("--tgt", required=True, help="Target collection name")
+    ap.add_argument("--top_k", type=int, default=1)
+    ap.add_argument("--mode", default="full_src", choices=["label_only", "full_src"])
+    ap.add_argument("--src", default=None, help="Source collection (optional, for enrichment)")
+    ap.add_argument("--out", default=None, help="Output CSV/TSV path (optional)")
+
+    # single query
+    ap.add_argument("--id", default=None, help="Single concept id")
+    ap.add_argument("--label", default=None, help="Single concept label")
+
+    # batch query
+    ap.add_argument("--input", default=None, help="Input file with queries (TSV/CSV)")
+
+    args = ap.parse_args()
+    cfg = BuildConfig()
+    logger = get_logger("retrieve", cfg.log_dir)
+
+    if args.tgt not in COLLECTIONS:
+        raise SystemExit(f"Unknown target collection: {args.tgt}. Available: {sorted(COLLECTIONS.keys())}")
+
+    if args.input:
+        queries = _load_queries_from_file(args.input)
+    elif args.id or args.label:
+        queries = [{"id": args.id or "", "label": args.label or ""}]
     else:
-        raise ValueError(query_mode)
+        raise SystemExit("Provide --input file or --id/--label for a single query.")
 
-    qvec = embed_one(qtext, tokenizer, model, device, cfg.max_length)
+    logger.info(f"Queries: {len(queries)}, target: {args.tgt}, top_k: {args.top_k}, mode: {args.mode}")
 
-    threshold = float(cfg.threshold)
-    overfetch_mult = int(cfg.overfetch_mult)
-    max_limit_mult = int(cfg.max_limit_mult)
+    results = retrieve_batch(
+        queries, args.tgt, cfg,
+        top_k=args.top_k, query_mode=args.mode,
+        src_collection=args.src, out_csv=args.out, logger=logger,
+    )
 
-    need = top_k
-    limit = max(need * overfetch_mult, need)
-    max_limit = need * max_limit_mult
+    # print to console if no output file
+    if not args.out:
+        for r in results:
+            print(f"\n[SRC] {r['src_id']}  {r['src_label']}")
+            for m in r["matches"]:
+                print(f"  #{m['rank']}  {m['id']}  {m['label']}  score={m['score']:.6f}")
 
-    spec = COLLECTIONS.get(tgt_db.cdir.name, {})
-    prefixes = spec.get("id_prefixes") or spec.get("id_prefix") or []
-    if isinstance(prefixes, str):
-        prefixes = [prefixes]
+    logger.info(f"Done. {len(results)} queries processed.")
 
-    def ok_prefix(pid: str) -> bool:
-        if not prefixes:
-            return True
-        return any(pid.startswith(p) for p in prefixes)
 
-    filtered: List[Tuple[str, float]] = []
-
-    while True:
-        scores, idxs = tgt_db.search(qvec, min(limit, tgt_db.count()))
-        filtered = []
-        for s, ix in zip(scores.tolist(), idxs.tolist()):
-            if ix < 0:
-                continue
-            pid = tgt_db.id_at_pos(ix)
-            if not pid:
-                continue
-            if not ok_prefix(pid):
-                continue
-            if s < threshold:
-                continue
-
-            filtered.append((pid, float(s)))
-            if len(filtered) >= need:
-                break
-
-        if len(filtered) >= need or limit >= max_limit:
-            break
-        limit = min(limit * 2, max_limit)
-
-    return filtered[:top_k]
+if __name__ == "__main__":
+    main()
