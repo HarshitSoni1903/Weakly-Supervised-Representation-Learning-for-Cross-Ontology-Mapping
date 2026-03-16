@@ -14,18 +14,18 @@ class BuildConfig:
 
     # embedding
     max_length: int = 512
-    embed_batch_size: int = 128 
+    embed_batch_size: int = 64
     device: str = "auto"
     synonym_cap: int = 10
 
     # retrieval
-    threshold: float = 0.9
+    threshold: float = 0.0
     overfetch_mult: int = 4
     max_limit_mult: int = 20    # max_limit = top_k * max_limit_mult
 
     # build flags
-    monitor_mode: bool = True  # prompt user with 2 samples before building
-    rebuild: bool = False       # overwrite existing collections
+    monitor_samples: int = 3    # 0=no prompt, N=show N random samples per ontology before building
+    rebuild: bool = False
 
     # logging
     log_dir: str = "logs"
@@ -108,11 +108,11 @@ COLLECTIONS: Dict[str, Dict] = {
         "owl_path": "doid.owl",
         "id_prefixes": ["DOID_"],
     },
-    "chebi": {
+    "mesh_full": {
         "source": "owl",
         "model": "ft",
-        "owl_path": "chebi.owl",
-        "id_prefixes": ["CHEBI_"],
+        "owl_path": "mesh.owl",
+        "id_prefixes": ["mesh_"],
     },
     "mesh_full_base": {
         "source": "owl",
@@ -120,11 +120,17 @@ COLLECTIONS: Dict[str, Dict] = {
         "owl_path": "mesh.owl",
         "id_prefixes": ["mesh_"],
     },
-    "mesh_full": {
+    "chebi_base": {
+        "source": "owl",
+        "model": "base",
+        "owl_path": "chebi.owl",
+        "id_prefixes": ["CHEBI_"],
+    },
+    "chebi": {
         "source": "owl",
         "model": "ft",
-        "owl_path": "mesh.owl",
-        "id_prefixes": ["mesh_"],
+        "owl_path": "chebi.owl",
+        "id_prefixes": ["CHEBI_"],
     },
 }
 
@@ -153,38 +159,61 @@ ABLATIONS: Dict[str, Dict] = {
         "src_col": "src_id",            
         "tgt_col": "tgt_id",            
         "ks": [1, 50, 100, 200],
-        "models": ["ft"],  #["base", "ft"]
-        "modes": ["full_src"],  #["label_only", "full_src"],         
+        "models": ["ft"],  #["base", "ft"],
+        "modes": ["full_src"],          
         "reverse": True,
     },
     "mondo2mesh": {
         "src_collection": "mondo",
         "tgt_collection": "mesh",
-        "gold_file": "gilda_mondo_mesh_predictions.sssom.tsv",
+        "gold_file": "positive.sssom.tsv",
         "src_col": "subject_id",
         "tgt_col": "object_id",
         "ks": [1, 50, 100, 200],
         "models": ["base", "ft"],
-        "modes": ["full_src"],
-        "reverse": True,
+        "modes": ["full_src"], #["label_only", "full_src"],
+        "reverse": False,
     },
-    "mondo2doid": {
-        "src_collection": "mondo",
-        "tgt_collection": "doid",
-        "gold_file": "mondo_doid_gold.tsv",
+    "mesh2mondo": {
+        "src_collection": "mesh",
+        "tgt_collection": "mondo",
+        "gold_file": "positive.sssom.tsv",
         "src_col": "subject_id",
         "tgt_col": "object_id",
         "ks": [1, 50, 100, 200],
-        "models": ["base", "ft"],
+        "models": ["ft"],
+        "modes": ["full_src"], #["label_only", "full_src"],
+        "reverse": False,
+    },
+    "mesh_full2chebi": {
+        "src_collection": "mesh_full",
+        "tgt_collection": "chebi",
+        "gold_file": "positive.sssom.tsv",
+        "src_col": "subject_id",
+        "tgt_col": "object_id",
+        "ks": [1, 50, 100, 200],
+        "models": ["ft"],
         "modes": ["label_only", "full_src"],
-        "reverse": True,
+        "reverse": False,
     },
+    "chebi2mesh_full": {
+        "src_collection": "chebi",
+        "tgt_collection": "mesh_full",
+        "gold_file": "positive.sssom.tsv",
+        "src_col": "subject_id",
+        "tgt_col": "object_id",
+        "ks": [1, 50, 100, 200],
+        "models": ["ft"],
+        "modes": ["full_src"],
+        "reverse": False,
+    },
+    
 }
 
 
 # Mapping study presets
-# Full ontology mapping. Uses same study keys as ablations where possible.
-# threshold: minimum cosine similarity to include a mapping (CLI overrides this)
+# Full ontology mapping. Uses vdb-to-vdb FAISS search (no model needed).
+# threshold: minimum cosine similarity to include a mapping (CLI overrides)
 # top_k: number of candidates per source concept
 # reverse: also map tgt->src and save a separate file
 
@@ -202,21 +231,31 @@ MAPPINGS: Dict[str, Dict] = {
     "mondo_mesh": {
         "src_collection": "mondo",
         "tgt_collection": "mesh",
-        "gold_file": "gilda_mondo_mesh_predictions.sssom.tsv",
+        "gold_file": "positive.sssom.tsv",
         "src_col": "subject_id",
         "tgt_col": "object_id",
-        "threshold": 0.9,
+        "threshold": 0.0,
         "top_k": 1,
-        "reverse": True,
+        "reverse": False,
     },
-    "mondo_doid": {
-        "src_collection": "mondo",
-        "tgt_collection": "doid",
-        "gold_file": "mondo_doid_gold.tsv",
+    "chebi_mesh_full": {
+        "src_collection": "chebi",
+        "tgt_collection": "mesh_full",
+        "gold_file": "positive.sssom.tsv",
+        "src_col": "subject_id",
+        "tgt_col": "object_id",
+        "threshold": 0.0,
+        "top_k": 1,
+        "reverse": False,
+    },
+    "mesh_full_chebi": {
+        "src_collection": "mesh_full",
+        "tgt_collection": "chebi",
+        "gold_file": "positive.sssom.tsv",
         "src_col": "subject_id",
         "tgt_col": "object_id",
         "threshold": 0.9,
         "top_k": 1,
-        "reverse": True,
+        "reverse": False,
     },
 }

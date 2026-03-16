@@ -119,10 +119,11 @@ def _evaluate_direction(
         qvec = all_qvecs[i : i + 1]  # (1, dim)
         scores, idxs = tgt_db.search(qvec, search_limit)
 
-        # get exact match ids for boosting
+        # exact match: label-only for boost decision, label+syns for candidate injection
         src_label = str(payload.get("label", "") or "")
         src_syns = payload.get("synonyms", []) or []
-        exact_ids = set(tgt_db.exact_match_ids(src_label, src_syns))
+        label_match_ids = set(tgt_db.exact_match_ids(src_label, []))
+        all_exact_ids = set(tgt_db.exact_match_ids(src_label, src_syns))
 
         # collect all candidates with their embedding scores
         candidates: List[Tuple[str, float]] = []
@@ -141,13 +142,13 @@ def _evaluate_direction(
                 break
 
         # add exact matches not already in candidates
-        for eid in exact_ids:
+        for eid in all_exact_ids:
             if ok_prefix(eid) and eid not in seen_ids:
                 candidates.append((eid, 0.0))
                 seen_ids.add(eid)
 
-        # only boost if unambiguous (single exact match), otherwise cosine decides
-        boost_ids = exact_ids if len(exact_ids) == 1 else set()
+        # boost if label has a single unambiguous match
+        boost_ids = label_match_ids if len(label_match_ids) == 1 else set()
 
         exact_ranked = [(pid, emb, 1.0) for pid, emb in candidates if pid in boost_ids]
         other_ranked = [(pid, emb, emb) for pid, emb in candidates if pid not in boost_ids]
@@ -162,11 +163,23 @@ def _evaluate_direction(
             is_hit = tgt_id in top_k_ids
             if is_hit:
                 hits_at[k] += 1
+
+            # include labels for readability
+            top_matches = []
+            for pid, sc in top_k:
+                tgt_meta = tgt_db.get_payload_by_id(pid)
+                top_matches.append({
+                    "id": pid,
+                    "label": tgt_meta.get("label", "") if tgt_meta else "",
+                    "score": round(sc, 6),
+                })
+
             per_k_rows[k].append({
                 "src_id": src_id,
+                "src_label": src_label,
                 "tgt_id_gold": tgt_id,
                 "hit": is_hit,
-                "top_matches": [{"id": pid, "score": round(sc, 6)} for pid, sc in top_k],
+                "top_matches": top_matches,
             })
 
         if total % 200 == 0 and 50 in hits_at:

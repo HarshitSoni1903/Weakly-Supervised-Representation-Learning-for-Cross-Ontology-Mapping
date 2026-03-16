@@ -15,7 +15,7 @@ import torch
 import torch.nn.functional as F
 from tqdm import tqdm
 from transformers import AutoModel, AutoTokenizer
-from owlready2 import get_ontology, default_world
+from owlready2 import get_ontology
 
 from config import BuildConfig, COLLECTIONS, resolve_path
 
@@ -194,6 +194,11 @@ def embed_texts(
     max_length: int,
 ) -> np.ndarray:
     """Embed one or many texts. Returns (N, dim) float32 array, L2-normalized."""
+    # pre-truncate: rough char limit to avoid tokenizer processing huge strings
+    # ~4 chars per token is a safe estimate, 2x headroom
+    char_limit = max_length * 8
+    texts = [t[:char_limit] for t in texts]
+
     enc = tokenizer(
         texts,
         padding=True,
@@ -299,75 +304,37 @@ def load_owl_concepts(owl_path: str, id_prefixes: Optional[List[str]] = None) ->
     if id_prefixes:
         norm_prefixes = [normalize_prefix(p) for p in id_prefixes]
 
-    # owlready2 doesn't expose dcterms:description or oboInOwl synonyms for some ontologies (e.g. mesh)
-    # so we pull them from the RDF graph in one pass
-    DCTERMS_DESC = "http://purl.org/dc/terms/description"
-    OBOINOWL = "http://www.geneontology.org/formats/oboInOwl#"
-    SYN_PREDICATES = [
-        f"{OBOINOWL}hasExactSynonym", f"{OBOINOWL}hasRelatedSynonym",
-        f"{OBOINOWL}hasBroadSynonym", f"{OBOINOWL}hasNarrowSynonym",
-    ]
-
-    rdf_defs: Dict[str, str] = {}
-    rdf_syns: Dict[str, List[str]] = {}
-    try:
-        graph = default_world.as_rdflib_graph()
-        from rdflib import URIRef
-        for s, p, o in graph.triples((None, URIRef(DCTERMS_DESC), None)):
-            rdf_defs[str(s)] = str(o)
-        for syn_pred in SYN_PREDICATES:
-            for s, p, o in graph.triples((None, URIRef(syn_pred), None)):
-                rdf_syns.setdefault(str(s), []).append(str(o))
-    except Exception:
-        pass
-
     for cls in onto.classes():
         cid = _owl_class_id(cls)
 
+        # filter: skip classes that don't belong to this ontology
         if norm_prefixes and not any(cid.startswith(np) for np in norm_prefixes):
             continue
 
         label = _first_str(getattr(cls, "label", "")) or cid
-        iri = str(getattr(cls, "iri", "") or "")
 
-        # definition: standard OBO fields first, then dcterms fallback
         definition = ""
         if hasattr(cls, "IAO_0000115"):
             definition = _first_str(getattr(cls, "IAO_0000115", ""))
         if not definition and hasattr(cls, "definition"):
             definition = _first_str(getattr(cls, "definition", ""))
-        if not definition:
-            definition = rdf_defs.get(iri, "")
+        if not definition and hasattr(cls, "description"):
+            definition = _first_str(getattr(cls, "description", ""))
 
-        # synonyms: standard OBO attributes first, then RDF graph fallback
         synonyms: List[str] = []
         for attr in _SYN_ATTRS:
             if hasattr(cls, attr):
                 synonyms.extend(_list_str(getattr(cls, attr, None)))
-        if not synonyms:
-            synonyms = rdf_syns.get(iri, [])
 
-        # dedup: case-insensitive, skip plurals and near-duplicates of label
-        seen: set = set()
-        label_lower = str(label).strip().lower()
+        # dedup preserving order
+        seen = set()
         syn2: List[str] = []
         for s in synonyms:
             s = str(s).strip()
-            if not s:
-                continue
-            s_lower = s.lower()
-            if s_lower == label_lower:
-                continue
-            # normalize: strip trailing s, remove periods/commas for comparison
-            stripped = s_lower.rstrip("s").replace(".", "").replace(",", "").replace("-", " ")
-            label_stripped = label_lower.rstrip("s").replace(".", "").replace(",", "").replace("-", " ")
-            if stripped in seen or s_lower in seen:
-                continue
-            if stripped == label_stripped:
+            if not s or s in seen:
                 continue
             syn2.append(s)
-            seen.add(s_lower)
-            seen.add(stripped)
+            seen.add(s)
 
         concepts.append({
             "id": cid,
@@ -415,13 +382,20 @@ class FaissCollection:
     def __init__(self, cdir: Path):
         self.cdir = cdir
         self.index = faiss.read_index(str(cdir / "index.faiss"))
+        # try GPU for faster search, fall back silently
+        try:
+            if hasattr(faiss, 'get_num_gpus') and faiss.get_num_gpus() > 0:
+                res = faiss.StandardGpuResources()
+                self.index = faiss.index_cpu_to_gpu(res, 0, self.index)
+        except Exception:
+            pass
         self.meta_path = cdir / "meta.jsonl"
         self.id2pos: Dict[str, int] = json.loads((cdir / "id2pos.json").read_text(encoding="utf-8"))
 
-        # load all metadata into memory once
+        # load all metadata into memory
         self._meta: List[Dict] = []
         self.label2pos: Dict[str, int] = {}
-        self.syn2pos: Dict[str, int] = {}  # synonym -> first position that has it
+        self.syn2pos: Dict[str, int] = {}
         self.pos2id: List[str] = []
         with open(self.meta_path, "r", encoding="utf-8") as f:
             for i, line in enumerate(f):
@@ -457,18 +431,16 @@ class FaissCollection:
 
     @staticmethod
     def _normalize_tokens(text: str) -> str:
-        """Lowercase, strip punctuation, sort tokens. 'Pancreatitis, Acute Hemorrhagic' -> 'acute hemorrhagic pancreatitis'"""
+        """Lowercase, strip punctuation, sort tokens."""
         import re
-        # normalize possessives before tokenizing: Crohn's -> Crohn
         text = re.sub(r"'s\b", "", text)
         tokens = re.findall(r'[a-z0-9]+', text.lower())
         return " ".join(sorted(tokens))
 
     def exact_match_ids(self, label: str, synonyms: Optional[List[str]] = None) -> List[str]:
         """Find target ids where source label/synonyms token-match target label/synonyms."""
-        # build lookup on first call and cache it
         if not hasattr(self, "_token_index"):
-            self._token_index: Dict[str, set] = {}  # normalized -> set of concept ids
+            self._token_index: Dict[str, set] = {}
             for i, meta in enumerate(self._meta):
                 cid = self.pos2id[i] if i < len(self.pos2id) else ""
                 if not cid:
@@ -483,7 +455,6 @@ class FaissCollection:
         matches = set()
         terms = [label] if label else []
         terms.extend(synonyms or [])
-
         for term in terms:
             norm = self._normalize_tokens(term)
             if norm and norm in self._token_index:
@@ -493,6 +464,9 @@ class FaissCollection:
     def search(self, qvec: np.ndarray, limit: int) -> Tuple[np.ndarray, np.ndarray]:
         scores, idxs = self.index.search(qvec, limit)
         return scores[0], idxs[0]
+
+    def reconstruct(self, pos: int) -> np.ndarray:
+        return self.index.reconstruct(pos)
 
     def id_at_pos(self, pos: int) -> str:
         if pos < 0 or pos >= len(self.pos2id):
@@ -682,7 +656,9 @@ def resolve_payload(
 
     db_rec = None
     if payload["id"]:
-        db_rec = src_db.get_payload_by_id(payload["id"])
+        cid = canonicalize_id(payload["id"])
+        payload["id"] = cid
+        db_rec = src_db.get_payload_by_id(cid)
     elif payload["label"]:
         db_rec = src_db.get_payload_by_label(payload["label"])
 
@@ -752,8 +728,9 @@ def fetch_top_k(
             return True
         return any(pid.startswith(p) for p in norm_prefixes)
 
-    # exact match ids for boosting
-    exact_ids = set(tgt_db.exact_match_ids(label, synonyms))
+    # exact match: label-only for unambiguous boost, label+syns for candidate injection
+    label_match_ids = set(tgt_db.exact_match_ids(label, []))
+    all_exact_ids = set(tgt_db.exact_match_ids(label, synonyms))
 
     # collect embedding results
     candidates: List[Tuple[str, float]] = []
@@ -777,14 +754,13 @@ def fetch_top_k(
             break
         limit = min(limit * 2, max_limit)
 
-    # add exact matches not already found by embedding search
-    for eid in exact_ids:
+    # add exact matches not found by embedding search
+    for eid in all_exact_ids:
         if ok_prefix(eid) and eid not in seen_ids:
             candidates.append((eid, 0.0))
 
-    # only boost if unambiguous (single exact match), otherwise cosine decides
-    boost_ids = exact_ids if len(exact_ids) == 1 else set()
-
+    # boost if label has a single unambiguous match
+    boost_ids = label_match_ids if len(label_match_ids) == 1 else set()
     exact_ranked = [(pid, emb, 1.0) for pid, emb in candidates if pid in boost_ids]
     other_ranked = [(pid, emb, emb) for pid, emb in candidates if pid not in boost_ids]
     exact_ranked.sort(key=lambda x: -x[1])
@@ -862,7 +838,8 @@ def load_gold_pairs(
     delim = _delimiter_for(gold_path)
 
     with open(gold_path, "r", encoding="utf-8", newline="") as f:
-        rows = [row for row in csv.reader(f, delimiter=delim) if any(str(c).strip() for c in row)]
+        rows = [row for row in csv.reader(f, delimiter=delim) 
+                if row and not row[0].startswith("#") and any(str(c).strip() for c in row)]
 
     if not rows:
         return pairs

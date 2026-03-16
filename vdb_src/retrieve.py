@@ -39,6 +39,7 @@ from utils import (
 
 def _infer_src_collection(cid: str) -> Optional[str]:
     """Try to figure out which collection an id belongs to based on prefix."""
+    cid = canonicalize_id(cid)
     for cname, spec in COLLECTIONS.items():
         raw_prefixes = spec.get("id_prefixes") or []
         if isinstance(raw_prefixes, str):

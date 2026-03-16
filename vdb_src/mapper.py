@@ -64,7 +64,7 @@ def _run_one_direction(
 
     for batch_start in tqdm(range(0, n_src, batch_size), desc=f"Mapping {src_name}->{tgt_name}", unit="batch"):
         batch_end = min(batch_start + batch_size, n_src)
-        src_vecs = np.vstack([src_db.index.reconstruct(i) for i in range(batch_start, batch_end)])
+        src_vecs = np.vstack([src_db.reconstruct(i) for i in range(batch_start, batch_end)])
         scores_batch, idxs_batch = tgt_db.index.search(src_vecs, search_k)
 
         for local_i in range(batch_end - batch_start):
@@ -77,10 +77,11 @@ def _run_one_direction(
             scores = scores_batch[local_i]
             idxs = idxs_batch[local_i]
 
-            # exact match boost
+            # exact match: label-only for boost, label+syns for candidate injection
             src_label = src_meta.get("label", "")
             src_syns = src_meta.get("synonyms", [])
-            exact_ids = set(tgt_db.exact_match_ids(src_label, src_syns))
+            label_match_ids = set(tgt_db.exact_match_ids(src_label, []))
+            all_exact_ids = set(tgt_db.exact_match_ids(src_label, src_syns))
 
             candidates: List[Tuple[str, float]] = []
             seen_ids: set = set()
@@ -95,12 +96,11 @@ def _run_one_direction(
                 candidates.append((pid, float(s)))
                 seen_ids.add(pid)
 
-            for eid in exact_ids:
+            for eid in all_exact_ids:
                 if ok_prefix(eid) and eid not in seen_ids:
                     candidates.append((eid, 0.0))
 
-            # unambiguous boost only
-            boost_ids = exact_ids if len(exact_ids) == 1 else set()
+            boost_ids = label_match_ids if len(label_match_ids) == 1 else set()
             exact_ranked = [(pid, emb, 1.0) for pid, emb in candidates if pid in boost_ids]
             other_ranked = [(pid, emb, emb) for pid, emb in candidates if pid not in boost_ids]
             exact_ranked.sort(key=lambda x: -x[1])

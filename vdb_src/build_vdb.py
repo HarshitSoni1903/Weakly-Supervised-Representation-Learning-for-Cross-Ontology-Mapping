@@ -1,10 +1,10 @@
 """
 Build FAISS vector databases for ontology collections.
+
 Usage:
-    python build_vdb.py                          # build all collections
-    python build_vdb.py --collections hp mp       # build specific ones
-    python build_vdb.py --collections hp --rebuild # overwrite existing
-    python build_vdb.py --monitor                  # preview 2 samples before building each
+    python build_vdb.py                                          # build all
+    python build_vdb.py --collections hp mp mesh mondo           # specific ones
+    python build_vdb.py --collections hp mp --rebuild            # overwrite
 """
 from __future__ import annotations
 
@@ -23,6 +23,7 @@ from utils import (
     load_csv_concepts,
     write_collection,
     run_all_sanity_checks,
+    model_name_for,
 )
 
 
@@ -38,50 +39,31 @@ def _resolve_owl_path(cfg: BuildConfig, owl_path: str) -> Path:
     raise FileNotFoundError(f"OWL file not found: tried {p} and {candidate}")
 
 
-def _load_concepts(cfg: BuildConfig, spec: dict, collection: str) -> list:
+def _load_concepts(cfg: BuildConfig, spec: dict) -> list:
     source = spec.get("source", "owl")
     id_prefixes = spec.get("id_prefixes", [])
 
     if source == "owl":
         owl_path = _resolve_owl_path(cfg, spec["owl_path"])
-        concepts = load_owl_concepts(str(owl_path), id_prefixes=id_prefixes or None)
+        return load_owl_concepts(str(owl_path), id_prefixes=id_prefixes or None)
     elif source == "csv":
         csv_path = resolve_path(cfg.data_dir) / spec["csv_path"]
-        concepts = load_csv_concepts(str(csv_path))
+        return load_csv_concepts(str(csv_path))
     else:
         raise ValueError(f"Unknown source type: {source}")
-
-    return concepts
-
-
-def _preview_concepts(concepts: list, collection: str, n: int = 2) -> bool:
-    """Print n random samples and ask y/n."""
-    samples = random.sample(concepts, min(n, len(concepts)))
-    print(f"\n{'='*60}")
-    print(f"[MONITOR] {collection}: {len(concepts)} concepts loaded. Showing {len(samples)} samples:")
-    for s in samples:
-        print(f"  id={s['id']}  label={s['label']}")
-        if s.get('definition'):
-            print(f"  def={s['definition'][:120]}...")
-        if s.get('synonyms'):
-            print(f"  syns={s['synonyms'][:5]}")
-        print()
-    resp = input("Proceed with building? [y/n]: ").strip().lower()
-    return resp in ("y", "yes", "")
 
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="Build FAISS collections from ontology files.")
     ap.add_argument("--collections", nargs="*", default=None, help="Which collections to build (default: all)")
     ap.add_argument("--rebuild", action="store_true", help="Overwrite existing collections")
-    ap.add_argument("--monitor", action="store_true", help="Preview samples before building each collection")
+    ap.add_argument("--monitor", type=int, default=None, help="Show N samples per ontology (overrides config)")
     args = ap.parse_args()
 
     cfg = BuildConfig()
     if args.rebuild:
         cfg.rebuild = True
-    if args.monitor:
-        cfg.monitor_mode = True
+    monitor_n = args.monitor if args.monitor is not None else cfg.monitor_samples
 
     logger = get_logger("build_vdb", cfg.log_dir)
     device = resolve_device(cfg.device)
@@ -92,7 +74,7 @@ def main() -> None:
             raise SystemExit(f"Unknown collection: {c}. Available: {sorted(COLLECTIONS.keys())}")
 
     logger.info(f"Collections to build: {cols}")
-    logger.info(f"Device: {device}, rebuild={cfg.rebuild}, monitor={cfg.monitor_mode}")
+    logger.info(f"Device: {device}, rebuild={cfg.rebuild}, monitor_samples={monitor_n}")
 
     # group by model so we load each model only once
     by_model: dict[str, list[str]] = {}
@@ -100,45 +82,75 @@ def main() -> None:
         m = COLLECTIONS[c]["model"]
         by_model.setdefault(m, []).append(c)
 
-    # cache parsed OWL files so we don't re-parse the same file
-    owl_cache: dict[str, list] = {}
+    # figure out which collections actually need building
+    to_build = []
+    for c in cols:
+        cdir = resolve_path(cfg.db_dir) / c
+        if cdir.exists() and not cfg.rebuild:
+            logger.info(f"[SKIP] {c} already exists (use --rebuild to overwrite)")
+        else:
+            to_build.append(c)
 
+    if not to_build:
+        logger.info("Nothing to build.")
+        return
+
+    # preview: load each unique source, show samples, then clear memory
+    if monitor_n > 0:
+        unique_sources: dict[str, int] = {}  # cache_key -> concept count
+        print(f"\n{'='*60}")
+        print(f"[MONITOR] Preview of source files, {monitor_n} samples each:")
+        for c in to_build:
+            spec = COLLECTIONS[c]
+            cache_key = spec.get("owl_path", "") or spec.get("csv_path", "")
+            if cache_key in unique_sources:
+                continue
+            concepts = _load_concepts(cfg, spec)
+            unique_sources[cache_key] = len(concepts)
+            samples = random.sample(concepts, min(monitor_n, len(concepts)))
+            print(f"\n--- {cache_key} ({len(concepts)} concepts) ---")
+            for s in samples:
+                print(f"  id={s['id']}  label={s['label']}")
+                if s.get('definition'):
+                    print(f"    def={s['definition'][:120]}...")
+                if s.get('synonyms'):
+                    print(f"    syns={s['synonyms'][:5]}")
+            del concepts  # free immediately
+        print(f"\n{'='*60}")
+        resp = input("Proceed with building all? [y/n]: ").strip().lower()
+        if resp not in ("y", "yes", ""):
+            logger.info("User declined. Exiting.")
+            return
+
+    # build — reload source files as needed, cache within each model group
     for model_key, col_names in by_model.items():
-        from utils import model_name_for
+        build_cols = [c for c in col_names if c in to_build]
+        if not build_cols:
+            continue
+
         mname = model_name_for(cfg, model_key)
         logger.info(f"Loading model [{model_key}]: {mname}")
         tok, mdl = load_encoder(mname, device)
 
-        for cname in col_names:
+        owl_cache: dict[str, list] = {}
+        for cname in build_cols:
             spec = COLLECTIONS[cname]
             cdir = resolve_path(cfg.db_dir) / cname
-
-            if cdir.exists() and not cfg.rebuild:
-                logger.info(f"[SKIP] {cname} already exists (use --rebuild to overwrite)")
-                continue
 
             if cdir.exists() and cfg.rebuild:
                 logger.info(f"[REBUILD] removing {cdir}")
                 shutil.rmtree(cdir)
 
-            # load concepts (with caching by owl_path)
             cache_key = spec.get("owl_path", "") or spec.get("csv_path", "")
             if cache_key not in owl_cache:
-                owl_cache[cache_key] = _load_concepts(cfg, spec, cname)
-            concepts = list(owl_cache[cache_key])  # copy so filtering doesn't affect cache
-
+                owl_cache[cache_key] = _load_concepts(cfg, spec)
+            concepts = list(owl_cache[cache_key])
             logger.info(f"[LOAD] {cname}: {len(concepts)} concepts from {cache_key}")
-
-            if cfg.monitor_mode:
-                if not _preview_concepts(concepts, cname):
-                    logger.info(f"[SKIP] {cname}: user declined")
-                    continue
 
             write_collection(cfg, cname, concepts, tok, mdl, device, logger)
             run_all_sanity_checks(cfg, cname, logger)
 
         free_encoder(tok, mdl, device)
-        # clear owl cache between models to free memory
         owl_cache.clear()
 
     logger.info("Build complete.")

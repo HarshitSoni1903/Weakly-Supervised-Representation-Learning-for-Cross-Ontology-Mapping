@@ -1,4 +1,6 @@
 ablation_study/
+ablation_results/
+mapper_results/
 ablation_study_old/
 db/
 db_old/
