@@ -27,6 +27,9 @@ class BuildConfig:
     monitor_samples: int = 3    # 0=no prompt, N=show N random samples per ontology before building
     rebuild: bool = False
 
+    # lexical matching
+    use_gilda: bool = False  # use gilda normalizer for lexical matching
+
     # logging
     log_dir: str = "logs"
 
@@ -166,13 +169,13 @@ ABLATIONS: Dict[str, Dict] = {
     "mondo2mesh": {
         "src_collection": "mondo",
         "tgt_collection": "mesh",
-        "gold_file": "positive.sssom.tsv",
+        "gold_file": "gilda_mondo_mesh_predictions.sssom.tsv",
         "src_col": "subject_id",
         "tgt_col": "object_id",
         "ks": [1, 50, 100, 200],
-        "models": ["base", "ft"],
+        "models": ["ft"],
         "modes": ["full_src"], #["label_only", "full_src"],
-        "reverse": False,
+        "reverse": True,
     },
     "mesh2mondo": {
         "src_collection": "mesh",
@@ -193,7 +196,7 @@ ABLATIONS: Dict[str, Dict] = {
         "tgt_col": "object_id",
         "ks": [1, 50, 100, 200],
         "models": ["ft"],
-        "modes": ["label_only", "full_src"],
+        "modes": ["full_src"],
         "reverse": False,
     },
     "chebi2mesh_full": {
@@ -244,7 +247,7 @@ MAPPINGS: Dict[str, Dict] = {
         "gold_file": "positive.sssom.tsv",
         "src_col": "subject_id",
         "tgt_col": "object_id",
-        "threshold": 0.0,
+        "threshold": 0.9,
         "top_k": 1,
         "reverse": False,
     },

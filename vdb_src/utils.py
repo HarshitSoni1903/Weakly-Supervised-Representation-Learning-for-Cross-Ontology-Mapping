@@ -379,8 +379,9 @@ def load_csv_concepts(
 # FAISS collection (read side)
 
 class FaissCollection:
-    def __init__(self, cdir: Path):
+    def __init__(self, cdir: Path, use_gilda: bool = False):
         self.cdir = cdir
+        self._use_gilda = use_gilda
         self.index = faiss.read_index(str(cdir / "index.faiss"))
         # try GPU for faster search, fall back silently
         try:
@@ -437,10 +438,28 @@ class FaissCollection:
         tokens = re.findall(r'[a-z0-9]+', text.lower())
         return " ".join(sorted(tokens))
 
+    @staticmethod
+    def _normalize_gilda(text: str) -> str:
+        """Normalize using gilda's biomedical text normalizer."""
+        try:
+            from gilda.process import normalize
+            return normalize(text) or ""
+        except ImportError:
+            return FaissCollection._normalize_tokens(text)
+
+    def _get_normalizer(self):
+        """Return the appropriate normalize function based on config."""
+        if self._use_gilda:
+            return self._normalize_gilda
+        return self._normalize_tokens
+
     def exact_match_ids(self, label: str, synonyms: Optional[List[str]] = None) -> List[str]:
-        """Find target ids where source label/synonyms token-match target label/synonyms."""
-        if not hasattr(self, "_token_index"):
-            self._token_index: Dict[str, set] = {}
+        """Find target ids where source label/synonyms match target label/synonyms."""
+        normalizer = self._get_normalizer()
+        cache_key = "_token_index_gilda" if self._use_gilda else "_token_index"
+
+        if not hasattr(self, cache_key):
+            index: Dict[str, set] = {}
             for i, meta in enumerate(self._meta):
                 cid = self.pos2id[i] if i < len(self.pos2id) else ""
                 if not cid:
@@ -448,17 +467,19 @@ class FaissCollection:
                 texts = [meta.get("label", "")]
                 texts.extend(meta.get("synonyms", []))
                 for t in texts:
-                    norm = self._normalize_tokens(t)
+                    norm = normalizer(t)
                     if norm:
-                        self._token_index.setdefault(norm, set()).add(cid)
+                        index.setdefault(norm, set()).add(cid)
+            setattr(self, cache_key, index)
 
+        token_index = getattr(self, cache_key)
         matches = set()
         terms = [label] if label else []
         terms.extend(synonyms or [])
         for term in terms:
-            norm = self._normalize_tokens(term)
-            if norm and norm in self._token_index:
-                matches.update(self._token_index[norm])
+            norm = normalizer(term)
+            if norm and norm in token_index:
+                matches.update(token_index[norm])
         return list(matches)
 
     def search(self, qvec: np.ndarray, limit: int) -> Tuple[np.ndarray, np.ndarray]:
@@ -478,7 +499,7 @@ def load_collection(cfg: BuildConfig, name: str) -> FaissCollection:
     cdir = resolve_path(cfg.db_dir) / name
     if not cdir.exists():
         raise SystemExit(f"Missing collection dir: {cdir}")
-    return FaissCollection(cdir)
+    return FaissCollection(cdir, use_gilda=cfg.use_gilda)
 
 
 # Writing a collection to disk
