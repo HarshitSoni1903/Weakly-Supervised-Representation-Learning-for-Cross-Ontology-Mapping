@@ -18,17 +18,17 @@ class BuildConfig:
     device: str = "auto"
     synonym_cap: int = 10
 
-    # retrieval
-    threshold: float = 0.0
-    overfetch_mult: int = 4
-    max_limit_mult: int = 20    # max_limit = top_k * max_limit_mult
+    # retrieval — simple: fetch 200, keep cosine >= 0.5, boost unambiguous label match
+    faiss_fetch_k: int = 200          # always fetch this many from FAISS per query
+    lexical_min_cosine: float = 0.5   # minimum cosine to enter the candidate pool
+    threshold: float = 0.9            # output threshold for mapper (CLI overrides)
 
     # build flags
-    monitor_samples: int = 3    # 0=no prompt, N=show N random samples per ontology before building
+    monitor_samples: int = 3
     rebuild: bool = False
 
     # lexical matching
-    use_gilda: bool = False  # use gilda normalizer for lexical matching
+    use_gilda: bool = False
 
     # logging
     log_dir: str = "logs"
@@ -43,8 +43,6 @@ def resolve_path(rel: str) -> Path:
 
 
 # Collection definitions
-# Each collection maps to one OWL file + one model variant.
-# id_prefixes is used to filter concepts and validate retrieval results.
 
 COLLECTIONS: Dict[str, Dict] = {
     "hp": {
@@ -111,6 +109,7 @@ COLLECTIONS: Dict[str, Dict] = {
         "owl_path": "doid.owl",
         "id_prefixes": ["DOID_"],
     },
+        
     "mesh_full": {
         "source": "owl",
         "model": "ft",
@@ -154,16 +153,17 @@ COLLECTIONS: Dict[str, Dict] = {
 # "reverse" means to also run the ablation in reverse direction, i.e. swap src_collection and tgt_collection and run the same evaluation. 
 
 
+
 ABLATIONS: Dict[str, Dict] = {
     "hp2mp": {
         "src_collection": "hp",
         "tgt_collection": "mp",
-        "gold_file": "hp_mp_gold.tsv",  
-        "src_col": "src_id",            
-        "tgt_col": "tgt_id",            
+        "gold_file": "hp_mp_gold.tsv",
+        "src_col": "src_id",
+        "tgt_col": "tgt_id",
         "ks": [1, 50, 100, 200],
-        "models": ["ft"],  #["base", "ft"],
-        "modes": ["full_src"],          
+        "models": ["ft"],
+        "modes": ["full_src"],
         "reverse": True,
     },
     "mondo2mesh": {
@@ -173,8 +173,8 @@ ABLATIONS: Dict[str, Dict] = {
         "src_col": "subject_id",
         "tgt_col": "object_id",
         "ks": [1, 50, 100, 200],
-        "models": ["ft"],
-        "modes": ["full_src"], #["label_only", "full_src"],
+        "models": ["base", "ft"],
+        "modes": ["full_src"],
         "reverse": True,
     },
     "mesh2mondo": {
@@ -187,6 +187,17 @@ ABLATIONS: Dict[str, Dict] = {
         "models": ["ft"],
         "modes": ["full_src"], #["label_only", "full_src"],
         "reverse": False,
+    },
+    "mondo2doid": {
+        "src_collection": "mondo",
+        "tgt_collection": "doid",
+        "gold_file": "mondo_doid_gold.tsv",
+        "src_col": "subject_id",
+        "tgt_col": "object_id",
+        "ks": [1, 50, 100, 200],
+        "models": ["base", "ft"],
+        "modes": ["label_only", "full_src"],
+        "reverse": True,
     },
     "mesh_full2chebi": {
         "src_collection": "mesh_full",
@@ -210,15 +221,10 @@ ABLATIONS: Dict[str, Dict] = {
         "modes": ["full_src"],
         "reverse": False,
     },
-    
 }
 
 
 # Mapping study presets
-# Full ontology mapping. Uses vdb-to-vdb FAISS search (no model needed).
-# threshold: minimum cosine similarity to include a mapping (CLI overrides)
-# top_k: number of candidates per source concept
-# reverse: also map tgt->src and save a separate file
 
 MAPPINGS: Dict[str, Dict] = {
     "hp_mp": {
@@ -237,7 +243,17 @@ MAPPINGS: Dict[str, Dict] = {
         "gold_file": "positive.sssom.tsv",
         "src_col": "subject_id",
         "tgt_col": "object_id",
-        "threshold": 0.0,
+        "threshold": 0.9,
+        "top_k": 1,
+        "reverse": False,
+    },
+    "mesh_mondo": {
+        "src_collection": "mesh",
+        "tgt_collection": "mondo",
+        "gold_file": "positive.sssom.tsv",
+        "src_col": "subject_id",
+        "tgt_col": "object_id",
+        "threshold": 0.9,
         "top_k": 1,
         "reverse": False,
     },

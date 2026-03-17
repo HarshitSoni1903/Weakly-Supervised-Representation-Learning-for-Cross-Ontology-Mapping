@@ -185,7 +185,8 @@ def main() -> None:
         for r in results:
             print(f"\n[SRC] {r['src_id']}  {r['src_label']}")
             for m in r["matches"]:
-                print(f"  #{m['rank']}  {m['id']}  {m['label']}  score={m['score']:.6f}")
+                remark = f"  ({m['remarks']})" if m.get('remarks') else ""
+                print(f"  #{m['rank']}  {m['id']}  {m['label']}  score={m['score']:.6f}{remark}")
 
     logger.info(f"Done. {len(results)} queries processed.")
 

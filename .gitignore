@@ -11,3 +11,5 @@ logs/
 vdb_src/__pycache__/
 *.pdf
 *.ipynby
+*.zip
+.vscode/

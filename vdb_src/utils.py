@@ -176,7 +176,7 @@ def free_encoder(tok, mdl, device: torch.device):
         torch.cuda.empty_cache()
 
 
-# Pooling & embedding
+# ── Pooling & embedding ────────────────────────────────────────────────
 
 def _mean_pool(last_hidden_state, attention_mask):
     mask = attention_mask.unsqueeze(-1).type_as(last_hidden_state)
@@ -445,6 +445,7 @@ class FaissCollection:
             from gilda.process import normalize
             return normalize(text) or ""
         except ImportError:
+            # fall back to token-based if gilda not installed
             return FaissCollection._normalize_tokens(text)
 
     def _get_normalizer(self):
@@ -700,6 +701,100 @@ def resolve_payload(
     return payload
 
 
+def rank_pool(
+    pool: List[Tuple[str, float]],
+    tgt_db: FaissCollection,
+    src_label: str,
+    threshold: float = 0.0,
+) -> List[Tuple[str, float, str]]:
+    """
+    Shared ranking logic for a candidate pool.
+    
+    pool: list of (concept_id, cosine_score), already filtered to cosine >= min_cosine
+    tgt_db: target collection (for exact_match_ids lookup)
+    src_label: source concept label for lexical matching
+    threshold: output threshold — non-boosted candidates below this are excluded
+    
+    Returns: sorted list of (concept_id, display_score, remarks)
+      - At most ONE candidate gets boosted to 1.0 (unambiguous label match)
+      - All others keep their cosine score, filtered by threshold
+    """
+    if not pool:
+        return []
+
+    pool_ids = {pid for pid, _ in pool}
+
+    # check for unambiguous label match in pool
+    label_match_ids = set(tgt_db.exact_match_ids(src_label, []))
+    boost_id = None
+    if len(label_match_ids) == 1:
+        eid = next(iter(label_match_ids))
+        if eid in pool_ids:
+            boost_id = eid
+
+    ranked: List[Tuple[str, float, str]] = []
+    for pid, cosine in pool:
+        if pid == boost_id:
+            ranked.append((pid, 1.0, f"cosine={cosine:.6f}"))
+        elif cosine >= threshold:
+            ranked.append((pid, cosine, ""))
+
+    ranked.sort(key=lambda x: -x[1])
+    return ranked
+
+
+def evaluate_predictions(
+    predictions_by_src: Dict[str, str],
+    gold_by_src: Dict[str, set],
+    src_db: "FaissCollection",
+    tgt_db: "FaissCollection",
+) -> Dict:
+    """
+    Shared evaluation logic for mapper.
+    
+    predictions_by_src: {src_id: predicted_tgt_id} — only for mapped concepts
+    gold_by_src: {src_id: set of valid tgt_ids} — one-to-many gold
+    
+    Returns dict with: testable, tp, fp, unmapped, accuracy, precision, 
+                       gold_src_missing, gold_tgt_missing
+    """
+    tp, fp, unmapped = 0, 0, 0
+    gold_src_missing, gold_tgt_missing = 0, 0
+
+    for src_id, expected_tgts in gold_by_src.items():
+        if src_id not in src_db.id2pos:
+            gold_src_missing += 1
+            continue
+        valid_tgts = {t for t in expected_tgts if t in tgt_db.id2pos}
+        if not valid_tgts:
+            gold_tgt_missing += 1
+            continue
+        predicted_tgt = predictions_by_src.get(src_id)
+        if predicted_tgt is None:
+            unmapped += 1
+        elif predicted_tgt in valid_tgts:
+            tp += 1
+        else:
+            fp += 1
+
+    testable = tp + fp + unmapped
+    mapped = tp + fp
+    accuracy = tp / testable if testable else 0.0
+    precision = tp / mapped if mapped else 0.0
+
+    return {
+        "gold_total": len(gold_by_src),
+        "gold_src_missing": gold_src_missing,
+        "gold_tgt_missing": gold_tgt_missing,
+        "testable": testable,
+        "tp": tp,
+        "fp": fp,
+        "unmapped": unmapped,
+        "accuracy": accuracy,
+        "precision": precision,
+    }
+
+
 def fetch_top_k(
     cfg: BuildConfig,
     src_payload: Dict,
@@ -712,8 +807,7 @@ def fetch_top_k(
 ) -> List[Dict]:
     """
     Retrieve top_k matches from tgt_db for a single source concept.
-    Returns list of dicts: [{id, label, definition, synonyms, score}, ...]
-    Respects threshold and id_prefix filtering from config.
+    Returns list of dicts: [{id, label, definition, synonyms, score, remarks}, ...]
     """
     if device is None:
         device = resolve_device(cfg.device)
@@ -730,13 +824,9 @@ def fetch_top_k(
         raise ValueError(f"Unknown query_mode: {query_mode}")
 
     qvec = embed_texts([qtext], tokenizer, model, device, cfg.max_length)
-
     threshold = float(cfg.threshold)
-    overfetch_mult = int(cfg.overfetch_mult)
-    max_limit_mult = int(cfg.max_limit_mult)
-    need = top_k
-    limit = max(need * overfetch_mult, need)
-    max_limit = need * max_limit_mult
+    min_cosine = cfg.lexical_min_cosine
+    fetch_k = min(cfg.faiss_fetch_k, tgt_db.count())
 
     spec = COLLECTIONS.get(tgt_db.cdir.name, {})
     raw_prefixes = spec.get("id_prefixes") or spec.get("id_prefix") or []
@@ -749,48 +839,27 @@ def fetch_top_k(
             return True
         return any(pid.startswith(p) for p in norm_prefixes)
 
-    # exact match: label-only for unambiguous boost, label+syns for candidate injection
-    label_match_ids = set(tgt_db.exact_match_ids(label, []))
-    all_exact_ids = set(tgt_db.exact_match_ids(label, synonyms))
-
-    # collect embedding results
-    candidates: List[Tuple[str, float]] = []
+    # fetch from FAISS, filter to pool
+    scores, idxs = tgt_db.search(qvec, fetch_k)
+    pool: List[Tuple[str, float]] = []
     seen_ids: set = set()
-
-    while True:
-        scores, idxs = tgt_db.search(qvec, min(limit, tgt_db.count()))
-        for s, ix in zip(scores.tolist(), idxs.tolist()):
-            if ix < 0:
-                continue
-            pid = tgt_db.id_at_pos(ix)
-            if not pid or not ok_prefix(pid) or pid in seen_ids:
-                continue
-            if s < threshold:
-                continue
-            candidates.append((pid, float(s)))
-            seen_ids.add(pid)
-            if len(candidates) >= need * 2:
-                break
-        if len(candidates) >= need or limit >= max_limit:
+    for s, ix in zip(scores.tolist(), idxs.tolist()):
+        if ix < 0:
+            continue
+        if s < min_cosine:
             break
-        limit = min(limit * 2, max_limit)
+        pid = tgt_db.id_at_pos(ix)
+        if not pid or not ok_prefix(pid) or pid in seen_ids:
+            continue
+        pool.append((pid, float(s)))
+        seen_ids.add(pid)
 
-    # add exact matches not found by embedding search
-    for eid in all_exact_ids:
-        if ok_prefix(eid) and eid not in seen_ids:
-            candidates.append((eid, 0.0))
+    # rank with shared logic
+    ranked = rank_pool(pool, tgt_db, label, threshold)
 
-    # boost if label has a single unambiguous match
-    boost_ids = label_match_ids if len(label_match_ids) == 1 else set()
-    exact_ranked = [(pid, emb, 1.0) for pid, emb in candidates if pid in boost_ids]
-    other_ranked = [(pid, emb, emb) for pid, emb in candidates if pid not in boost_ids]
-    exact_ranked.sort(key=lambda x: -x[1])
-    other_ranked.sort(key=lambda x: -x[1])
-    ranked = [(pid, display) for pid, _, display in exact_ranked + other_ranked]
-
-    # enrich results with metadata from tgt_db
+    # enrich results
     results: List[Dict] = []
-    for pid, score in ranked[:top_k]:
+    for pid, score, remarks in ranked[:top_k]:
         meta = tgt_db.get_payload_by_id(pid) or {}
         results.append({
             "id": pid,
@@ -798,6 +867,7 @@ def fetch_top_k(
             "definition": meta.get("definition", ""),
             "synonyms": meta.get("synonyms", []),
             "score": score,
+            "remarks": remarks,
         })
     return results
 
@@ -821,7 +891,7 @@ def write_results_csv(
     has_gold = gold_src_ids is not None
     with open(out_path, "w", encoding="utf-8", newline="") as f:
         w = csv.writer(f, delimiter=delimiter)
-        header = ["src_id", "src_label", "tgt_id", "tgt_label", "rank", "score"]
+        header = ["src_id", "src_label", "tgt_id", "tgt_label", "rank", "score", "remarks"]
         if has_gold:
             header.append("in_gold")
         w.writerow(header)
@@ -836,6 +906,7 @@ def write_results_csv(
                     m.get("label", ""),
                     m.get("rank", ""),
                     f"{m.get('score', 0.0):.8f}",
+                    m.get("remarks", ""),
                 ]
                 if has_gold:
                     row.append("1" if src_id in gold_src_ids else "0")

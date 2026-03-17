@@ -3,9 +3,9 @@ Full ontology mapper. Reads study config from MAPPINGS in config.py.
 Runs both directions automatically, saves separate files, evaluates against gold.
 
 Usage:
-    python mapper.py --study hp2mp
-    python mapper.py --study hp2mp --threshold 0.9
-    python mapper.py --study mondo2mesh --top_k 5
+    python mapper.py --study hp_mp
+    python mapper.py --study hp_mp --threshold 0.9
+    python mapper.py --study mondo_mesh --top_k 5
 """
 from __future__ import annotations
 
@@ -25,6 +25,8 @@ from utils import (
     load_gold_pairs,
     write_results_csv,
     normalize_prefix,
+    rank_pool,
+    evaluate_predictions,
 )
 
 
@@ -55,8 +57,9 @@ def _run_one_direction(
         return any(pid.startswith(p) for p in norm_prefixes)
 
     n_src = src_db.count()
-    search_k = min(max(top_k * cfg.overfetch_mult, 50), tgt_db.count())  # at least 50 candidates
-    logger.info(f"  {src_name}->{tgt_name}: {n_src} src, {tgt_db.count()} tgt, search_k={search_k}, threshold={threshold}")
+    fetch_k = min(cfg.faiss_fetch_k, tgt_db.count())
+    min_cosine = cfg.lexical_min_cosine
+    logger.info(f"  {src_name}->{tgt_name}: {n_src} src, {tgt_db.count()} tgt, fetch_k={fetch_k}, threshold={threshold}, min_cosine={min_cosine}")
 
     all_results: List[Dict] = []
     predictions_by_src: Dict[str, str] = {}
@@ -65,7 +68,7 @@ def _run_one_direction(
     for batch_start in tqdm(range(0, n_src, batch_size), desc=f"Mapping {src_name}->{tgt_name}", unit="batch"):
         batch_end = min(batch_start + batch_size, n_src)
         src_vecs = np.vstack([src_db.reconstruct(i) for i in range(batch_start, batch_end)])
-        scores_batch, idxs_batch = tgt_db.index.search(src_vecs, search_k)
+        scores_batch, idxs_batch = tgt_db.index.search(src_vecs, fetch_k)
 
         for local_i in range(batch_end - batch_start):
             pos = batch_start + local_i
@@ -76,39 +79,25 @@ def _run_one_direction(
             src_meta = src_db.get_payload_by_id(src_id) or {}
             scores = scores_batch[local_i]
             idxs = idxs_batch[local_i]
-
-            # exact match: label-only for boost, label+syns for candidate injection
             src_label = src_meta.get("label", "")
-            src_syns = src_meta.get("synonyms", [])
-            label_match_ids = set(tgt_db.exact_match_ids(src_label, []))
-            all_exact_ids = set(tgt_db.exact_match_ids(src_label, src_syns))
 
-            candidates: List[Tuple[str, float]] = []
-            seen_ids: set = set()
+            # build pool: cosine >= min_cosine, prefix-filtered
+            pool: List[Tuple[str, float]] = []
             for s, ix in zip(scores.tolist(), idxs.tolist()):
                 if ix < 0:
                     continue
+                if s < min_cosine:
+                    break
                 pid = tgt_db.id_at_pos(ix)
-                if not pid or not ok_prefix(pid) or pid in seen_ids:
+                if not pid or not ok_prefix(pid):
                     continue
-                if s < threshold:
-                    continue
-                candidates.append((pid, float(s)))
-                seen_ids.add(pid)
+                pool.append((pid, float(s)))
 
-            for eid in all_exact_ids:
-                if ok_prefix(eid) and eid not in seen_ids:
-                    candidates.append((eid, 0.0))
-
-            boost_ids = label_match_ids if len(label_match_ids) == 1 else set()
-            exact_ranked = [(pid, emb, 1.0) for pid, emb in candidates if pid in boost_ids]
-            other_ranked = [(pid, emb, emb) for pid, emb in candidates if pid not in boost_ids]
-            exact_ranked.sort(key=lambda x: -x[1])
-            other_ranked.sort(key=lambda x: -x[1])
-            final_ranked = [(pid, display) for pid, _, display in exact_ranked + other_ranked]
+            # rank with shared logic — threshold gates output
+            ranked = rank_pool(pool, tgt_db, src_label, threshold)
 
             matches: List[Dict] = []
-            for pid, score in final_ranked[:top_k]:
+            for pid, score, remarks in ranked[:top_k]:
                 meta = tgt_db.get_payload_by_id(pid) or {}
                 matches.append({
                     "id": pid,
@@ -116,6 +105,7 @@ def _run_one_direction(
                     "definition": meta.get("definition", ""),
                     "synonyms": meta.get("synonyms", []),
                     "score": score,
+                    "remarks": remarks,
                     "rank": len(matches) + 1,
                 })
 
@@ -132,37 +122,12 @@ def _run_one_direction(
     write_results_csv(all_results, out_path, gold_src_ids=gold_src_ids)
     logger.info(f"  Mappings written to {out_path}: {len(all_results)} concepts")
 
-    # gold evaluation — for each gold src where both src and tgt exist in db:
-    #   TP: predicted correct target
-    #   FP: predicted wrong target
-    #   unmapped: nothing above threshold — still a failure if gold target existed
-    tp, fp, unmapped, gold_src_missing, gold_tgt_missing = 0, 0, 0, 0, 0
+    # evaluate against gold
+    eval_result = {}
     if gold_by_src:
-        for src_id, expected_tgts in gold_by_src.items():
-            if src_id not in src_db.id2pos:
-                gold_src_missing += 1
-                continue
-            valid_tgts = {t for t in expected_tgts if t in tgt_db.id2pos}
-            if not valid_tgts:
-                gold_tgt_missing += 1
-                continue
-            predicted_tgt = predictions_by_src.get(src_id)
-            if predicted_tgt is None:
-                unmapped += 1
-            elif predicted_tgt in valid_tgts:
-                tp += 1
-            else:
-                fp += 1
-
-        testable = tp + fp + unmapped  # all gold pairs where both src and tgt exist
-        mapped = tp + fp               # subset that produced a prediction
-        accuracy = tp / testable if testable else 0.0      # of all testable, how many correct
-        precision = tp / mapped if mapped else 0.0          # of predictions made, how many correct
-        logger.info(f"  Eval: testable={testable} TP={tp} FP={fp} unmapped={unmapped} accuracy={accuracy:.4f} precision={precision:.4f} (gold_src_missing={gold_src_missing} gold_tgt_missing={gold_tgt_missing})")
-    else:
-        accuracy, precision = 0.0, 0.0
-        testable, mapped = 0, 0
-        tp, fp, unmapped, gold_src_missing, gold_tgt_missing = 0, 0, 0, 0, 0
+        eval_result = evaluate_predictions(predictions_by_src, gold_by_src, src_db, tgt_db)
+        e = eval_result
+        logger.info(f"  Eval: testable={e['testable']} TP={e['tp']} FP={e['fp']} unmapped={e['unmapped']} accuracy={e['accuracy']:.4f} precision={e['precision']:.4f} (gold_src_missing={e['gold_src_missing']} gold_tgt_missing={e['gold_tgt_missing']})")
 
     return {
         "direction": f"{src_name}->{tgt_name}",
@@ -170,15 +135,7 @@ def _run_one_direction(
         "tgt_concepts": tgt_db.count(),
         "threshold": threshold,
         "top_k": top_k,
-        "gold_total": len(gold_by_src),
-        "gold_src_missing": gold_src_missing,
-        "gold_tgt_missing": gold_tgt_missing,
-        "testable": testable,
-        "tp": tp,
-        "fp": fp,
-        "unmapped": unmapped,
-        "accuracy": accuracy,
-        "precision": precision,
+        **eval_result,
     }
 
 
@@ -204,7 +161,7 @@ def main() -> None:
     do_reverse = study.get("reverse", True)
 
     # load gold pairs — one src can have multiple valid targets
-    gold_fwd: Dict[str, set] = {}  # src_id -> set of valid tgt_ids
+    gold_fwd: Dict[str, set] = {}
     gold_rev: Dict[str, set] = {}
     gold_file = study.get("gold_file")
     if gold_file:
@@ -233,7 +190,6 @@ def main() -> None:
     out_dir = PROJECT_ROOT / "mapper_results" / args.study / f"run_{run_stamp}"
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    # save run config
     (out_dir / "run_config.json").write_text(json.dumps({
         "study": args.study, "threshold": threshold, "top_k": top_k,
         "reverse": do_reverse, "study_params": study,
@@ -243,7 +199,7 @@ def main() -> None:
 
     results = []
 
-    # forward direction
+    # forward
     fwd_path = out_dir / f"{src_col_name}_to_{tgt_col_name}.tsv"
     fwd_metrics = _run_one_direction(
         src_col_name, tgt_col_name, cfg, threshold, top_k, args.batch_size,
@@ -251,7 +207,7 @@ def main() -> None:
     )
     results.append(fwd_metrics)
 
-    # reverse direction
+    # reverse
     if do_reverse:
         rev_path = out_dir / f"{tgt_col_name}_to_{src_col_name}.tsv"
         rev_metrics = _run_one_direction(
@@ -260,7 +216,6 @@ def main() -> None:
         )
         results.append(rev_metrics)
 
-    # write summary
     summary_path = out_dir / "summary.json"
     summary_path.write_text(json.dumps(results, indent=2), encoding="utf-8")
     logger.info(f"Summary: {summary_path}")
