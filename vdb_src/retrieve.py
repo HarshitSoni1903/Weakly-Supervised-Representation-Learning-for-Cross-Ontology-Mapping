@@ -34,13 +34,16 @@ from utils import (
     write_results_csv,
     canonicalize_id,
     normalize_prefix,
+    model_name_for,
 )
 
 
-def _infer_src_collection(cid: str) -> Optional[str]:
-    """Try to figure out which collection an id belongs to based on prefix."""
+def _infer_src_collection(cid: str, model_key: str = "ft") -> Optional[str]:
+    """Try to figure out which collection an id belongs to based on prefix and model."""
     cid = canonicalize_id(cid)
     for cname, spec in COLLECTIONS.items():
+        if spec.get("model") != model_key:
+            continue
         raw_prefixes = spec.get("id_prefixes") or []
         if isinstance(raw_prefixes, str):
             raw_prefixes = [raw_prefixes]
@@ -65,7 +68,8 @@ def retrieve_batch(
     Returns list of {src_id, src_label, matches: [{id, label, definition, synonyms, score, rank}]}
     """
     device = resolve_device(cfg.device)
-    tok, mdl = load_encoder(cfg.ft_model_path, device)
+    model_key = COLLECTIONS[tgt_collection]["model"]
+    tok, mdl = load_encoder(model_name_for(cfg, model_key), device)
 
     tgt_db = load_collection(cfg, tgt_collection)
 
@@ -81,7 +85,7 @@ def retrieve_batch(
         # if src_collection not given explicitly, try to infer from id
         effective_src_db = src_db
         if effective_src_db is None and q.get("id"):
-            inferred = _infer_src_collection(q["id"])
+            inferred = _infer_src_collection(q["id"], model_key)
             if inferred:
                 if inferred not in src_db_cache:
                     try:

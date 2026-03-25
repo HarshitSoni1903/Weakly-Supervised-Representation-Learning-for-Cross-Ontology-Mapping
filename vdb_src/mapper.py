@@ -41,6 +41,12 @@ def _run_one_direction(
     out_path: Path,
     logger,
 ) -> Dict:
+    src_model = COLLECTIONS.get(src_name, {}).get("model")
+    tgt_model = COLLECTIONS.get(tgt_name, {}).get("model")
+    assert src_model == tgt_model, (
+        f"Model mismatch: {src_name} uses '{src_model}', {tgt_name} uses '{tgt_model}'"
+    )
+
     src_db = load_collection(cfg, src_name)
     tgt_db = load_collection(cfg, tgt_name)
 

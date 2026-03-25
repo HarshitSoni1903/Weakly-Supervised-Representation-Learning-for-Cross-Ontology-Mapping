@@ -93,8 +93,8 @@ def _clean(s: str) -> str:
 # Embedding text construction
 
 def _is_junk(s: str) -> bool:
-    """Catch stringified empty containers that slipped through OWL parsing."""
-    return s in ("[]", "{}", "None", "none", "()")
+    """Catch stringified empty containers and nan that slipped through OWL/pandas."""
+    return s in ("[]", "{}", "None", "none", "()", "nan", "NaN", "N/A", "n/a")
 
 
 def build_embedding_text(
@@ -308,7 +308,7 @@ def load_owl_concepts(owl_path: str, id_prefixes: Optional[List[str]] = None) ->
         cid = _owl_class_id(cls)
 
         # filter: skip classes that don't belong to this ontology
-        if norm_prefixes and not any(cid.startswith(np) for np in norm_prefixes):
+        if norm_prefixes and not any(cid.startswith(pfx) for pfx in norm_prefixes):
             continue
 
         label = _first_str(getattr(cls, "label", "")) or cid
@@ -575,7 +575,8 @@ def check_count(cfg: BuildConfig, collection: str, logger: Optional[logging.Logg
 
     idx = faiss.read_index(str(index_path))
     n_index = int(idx.ntotal)
-    n_meta = sum(1 for _ in open(meta_path, "r", encoding="utf-8"))
+    with open(meta_path, "r", encoding="utf-8") as f:
+        n_meta = sum(1 for _ in f)
 
     if n_index <= 0:
         log.error(f"[SANITY] {collection}: FAIL — index is empty")
