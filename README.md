@@ -212,10 +212,6 @@ flowchart TD
     LEX -->|"0 or 2+ matches"| COSINE["Rank by cosine\nFiltered by threshold (0.9)"]
     BOOST --> OUTPUT["Ranked output"]
     COSINE --> OUTPUT
-    
-    style DROP fill:#f5f5f5,stroke:#999,color:#999
-    style BOOST fill:#FAECE7,stroke:#993C1D
-    style OUTPUT fill:#EEEDFE,stroke:#534AB7
 ```
 
 Retrieval runs as a three-stage funnel, applied in all workflows (mapper, ablation, 
