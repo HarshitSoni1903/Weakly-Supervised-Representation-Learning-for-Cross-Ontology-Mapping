@@ -18,7 +18,7 @@ class BuildConfig:
     device: str = "auto"
     synonym_cap: int = 10
 
-    # retrieval — simple: fetch 200, keep cosine >= 0.5, boost unambiguous label match
+    # retrieval: simple: fetch 200, keep cosine >= 0.5, boost unambiguous label match
     faiss_fetch_k: int = 200          # always fetch this many from FAISS per query
     lexical_min_cosine: float = 0.5   # minimum cosine to enter the candidate pool
     threshold: float = 0.9            # output threshold for mapper (CLI overrides)

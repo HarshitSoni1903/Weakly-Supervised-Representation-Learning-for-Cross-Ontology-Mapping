@@ -1,0 +1,6 @@
+[console_scripts]
+leonmap-ablation = leonmap.ablation:main
+leonmap-build = leonmap.build_vdb:main
+leonmap-map = leonmap.mapper:main
+leonmap-retrieve = leonmap.retrieve:main
+leonmap-sanity = leonmap.sanity_checks:main

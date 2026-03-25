@@ -1,6 +1,6 @@
 """Compare ablation approach (fresh embed) vs mapper approach (reconstruct from FAISS)"""
-from config import BuildConfig
-from utils import (load_collection, load_encoder, resolve_device, 
+from leonmap.config import BuildConfig
+from leonmap.utils import (load_collection, load_encoder, resolve_device, 
                    embed_texts, build_embedding_text)
 import numpy as np
 

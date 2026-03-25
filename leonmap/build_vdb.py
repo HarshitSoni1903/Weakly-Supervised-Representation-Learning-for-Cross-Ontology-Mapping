@@ -13,8 +13,8 @@ import random
 import shutil
 from pathlib import Path
 
-from config import BuildConfig, COLLECTIONS, resolve_path
-from utils import (
+from leonmap.config import BuildConfig, COLLECTIONS, resolve_path
+from leonmap.utils import (
     get_logger,
     resolve_device,
     load_encoder,
@@ -122,7 +122,7 @@ def main() -> None:
             logger.info("User declined. Exiting.")
             return
 
-    # build — reload source files as needed, cache within each model group
+    # build: reload source files as needed, cache within each model group
     for model_key, col_names in by_model.items():
         build_cols = [c for c in col_names if c in to_build]
         if not build_cols:

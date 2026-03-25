@@ -1,0 +1,52 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "leonmap"
+version = "0.1.0"
+description = "LeonMap: Learned Ontology Mapping -- cross-ontology concept mapping via fine-tuned SapBERT embeddings and FAISS retrieval"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+authors = [
+    {name = "Harshit Soni", email = "hs5666@nyu.edu"},
+]
+keywords = ["ontology", "mapping", "sapbert", "faiss", "biomedical", "NLP"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+
+dependencies = [
+    "torch>=2.0",
+    "transformers>=4.30",
+    "faiss-cpu>=1.7",
+    "numpy>=1.24",
+    "tqdm>=4.60",
+    "owlready2>=0.40",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+preprocess = ["lxml>=4.9"]
+gilda = ["gilda>=1.0"]
+dev = ["pronto>=2.5"]
+
+[project.scripts]
+leonmap-build = "leonmap.build_vdb:main"
+leonmap-map = "leonmap.mapper:main"
+leonmap-ablation = "leonmap.ablation:main"
+leonmap-retrieve = "leonmap.retrieve:main"
+leonmap-sanity = "leonmap.sanity_checks:main"
+
+[project.urls]
+Repository = "https://github.com/HarshitSoni1903/Weakly-Supervised-Representation-Learning-for-Cross-Ontology-Mapping"
+
+[tool.setuptools.packages.find]
+include = ["leonmap*"]

@@ -18,8 +18,8 @@ from typing import Dict, List, Set, Tuple
 import numpy as np
 from tqdm import tqdm
 
-from config import BuildConfig, COLLECTIONS, MAPPINGS, PROJECT_ROOT, resolve_path
-from utils import (
+from leonmap.config import BuildConfig, COLLECTIONS, MAPPINGS, PROJECT_ROOT, resolve_path
+from leonmap.utils import (
     get_logger,
     load_collection,
     load_gold_pairs,
@@ -99,7 +99,7 @@ def _run_one_direction(
                     continue
                 pool.append((pid, float(s)))
 
-            # rank with shared logic — threshold gates output
+            # rank with shared logic: threshold gates output
             ranked = rank_pool(pool, tgt_db, src_label, threshold)
 
             matches: List[Dict] = []
@@ -151,8 +151,12 @@ def main() -> None:
     ap.add_argument("--threshold", type=float, default=None, help="Override config threshold")
     ap.add_argument("--top_k", type=int, default=None, help="Override config top_k")
     ap.add_argument("--batch_size", type=int, default=512)
+    ap.add_argument("--config", default=None, help="Path to YAML config override")
     args = ap.parse_args()
 
+    if args.config:
+        from leonmap.config_loader import load_user_config
+        load_user_config(args.config)
     if args.study not in MAPPINGS:
         raise SystemExit(f"Unknown study: {args.study}. Available: {sorted(MAPPINGS.keys())}")
 
@@ -166,7 +170,7 @@ def main() -> None:
     tgt_col_name = study["tgt_collection"]
     do_reverse = study.get("reverse", True)
 
-    # load gold pairs — one src can have multiple valid targets
+    # load gold pairs: one src can have multiple valid targets
     gold_fwd: Dict[str, set] = {}
     gold_rev: Dict[str, set] = {}
     gold_file = study.get("gold_file")

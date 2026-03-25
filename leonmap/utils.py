@@ -17,7 +17,7 @@ from tqdm import tqdm
 from transformers import AutoModel, AutoTokenizer
 from owlready2 import get_ontology
 
-from config import BuildConfig, COLLECTIONS, resolve_path
+from leonmap.config import BuildConfig, COLLECTIONS, resolve_path
 
 # OpenMP env (must happen before faiss/torch spin up threads) usually an issue on MacOS
 if platform.system() == "Darwin":
@@ -67,7 +67,7 @@ def canonicalize_id(raw: str, prefix: str = "") -> str:
     elif "_" in s:
         ns, local = s.split("_", 1)
     else:
-        # no namespace — use prefix param or return as-is lowercase
+        # no namespace: use prefix param or return as-is lowercase
         return f"{prefix.lower()}:{s}" if prefix else s.lower()
 
     ns = (prefix if prefix else ns).lower()
@@ -579,13 +579,13 @@ def check_count(cfg: BuildConfig, collection: str, logger: Optional[logging.Logg
         n_meta = sum(1 for _ in f)
 
     if n_index <= 0:
-        log.error(f"[SANITY] {collection}: FAIL — index is empty")
+        log.error(f"[SANITY] {collection}: FAIL, index is empty")
         return 0
     if n_index != n_meta:
-        log.error(f"[SANITY] {collection}: FAIL — index/meta count mismatch (index={n_index}, meta={n_meta})")
+        log.error(f"[SANITY] {collection}: FAIL, index/meta count mismatch (index={n_index}, meta={n_meta})")
         return n_index
 
-    log.info(f"[SANITY] {collection}: count OK — index={n_index} meta={n_meta}")
+    log.info(f"[SANITY] {collection}: count OK, index={n_index} meta={n_meta}")
     return n_index
 
 
@@ -615,11 +615,11 @@ def check_embedding_health(cfg: BuildConfig, collection: str, trials: int = 20, 
     max_sim = max(sims)
 
     if avg_sim > 0.95:
-        log.error(f"[SANITY] {collection}: FAIL — embeddings near-collapsed (avg_sim={avg_sim:.4f}, range=[{min_sim:.4f}, {max_sim:.4f}], pairs: {', '.join(pairs_detail)})")
+        log.error(f"[SANITY] {collection}: FAIL, embeddings near-collapsed (avg_sim={avg_sim:.4f}, range=[{min_sim:.4f}, {max_sim:.4f}], pairs: {', '.join(pairs_detail)})")
     elif avg_sim > 0.80:
-        log.warning(f"[SANITY] {collection}: WARNING — high avg similarity, embeddings may be poorly differentiated (avg_sim={avg_sim:.4f}, range=[{min_sim:.4f}, {max_sim:.4f}])")
+        log.warning(f"[SANITY] {collection}: WARNING, high avg similarity, embeddings may be poorly differentiated (avg_sim={avg_sim:.4f}, range=[{min_sim:.4f}, {max_sim:.4f}])")
     else:
-        log.info(f"[SANITY] {collection}: embedding health OK — avg_sim={avg_sim:.4f}, range=[{min_sim:.4f}, {max_sim:.4f}]")
+        log.info(f"[SANITY] {collection}: embedding health OK, avg_sim={avg_sim:.4f}, range=[{min_sim:.4f}, {max_sim:.4f}]")
 
 
 def self_retrieval_check(cfg: BuildConfig, collection: str, trials: int = 5, top_k: int = 10, logger: Optional[logging.Logger] = None) -> None:
@@ -629,7 +629,7 @@ def self_retrieval_check(cfg: BuildConfig, collection: str, trials: int = 5, top
     log = logger or logging.getLogger("sanity")
 
     if n <= 0:
-        log.error(f"[SANITY] {collection}: FAIL — index is empty, cannot run self-retrieval")
+        log.error(f"[SANITY] {collection}: FAIL, index is empty, cannot run self-retrieval")
         return
 
     failures = []
@@ -643,7 +643,7 @@ def self_retrieval_check(cfg: BuildConfig, collection: str, trials: int = 5, top
             failures.append(f"pos={i} (top-5 ids={top_ids}, scores={top_scores})")
 
     if failures:
-        log.warning(f"[SANITY] {collection}: self-retrieval — {len(failures)}/{trials} missed top-{top_k}. Details: {'; '.join(failures)}")
+        log.warning(f"[SANITY] {collection}: self-retrieval, {len(failures)}/{trials} missed top-{top_k}. Details: {'; '.join(failures)}")
     else:
         log.info(f"[SANITY] {collection}: self-retrieval OK ({trials}/{trials} found in top-{top_k})")
 
@@ -714,7 +714,7 @@ def rank_pool(
     pool: list of (concept_id, cosine_score), already filtered to cosine >= min_cosine
     tgt_db: target collection (for exact_match_ids lookup)
     src_label: source concept label for lexical matching
-    threshold: output threshold — non-boosted candidates below this are excluded
+    threshold: output threshold: non-boosted candidates below this are excluded
     
     Returns: sorted list of (concept_id, display_score, remarks)
       - At most ONE candidate gets boosted to 1.0 (unambiguous label match)
@@ -753,8 +753,8 @@ def evaluate_predictions(
     """
     Shared evaluation logic for mapper.
     
-    predictions_by_src: {src_id: predicted_tgt_id} — only for mapped concepts
-    gold_by_src: {src_id: set of valid tgt_ids} — one-to-many gold
+    predictions_by_src: {src_id: predicted_tgt_id}: only for mapped concepts
+    gold_by_src: {src_id: set of valid tgt_ids}: one-to-many gold
     
     Returns dict with: testable, tp, fp, unmapped, accuracy, precision, 
                        gold_src_missing, gold_tgt_missing
@@ -942,7 +942,7 @@ def load_gold_pairs(
     tgt_i: Optional[int] = None
 
     if src_col and tgt_col:
-        # columns explicitly given — find them by exact match
+        # columns explicitly given: find them by exact match
         s, t = src_col.strip().lower(), tgt_col.strip().lower()
         for i, h in enumerate(header_l):
             if src_i is None and h == s:

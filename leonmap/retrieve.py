@@ -22,8 +22,8 @@ from typing import Dict, List, Optional
 
 from tqdm import tqdm
 
-from config import BuildConfig, COLLECTIONS
-from utils import (
+from leonmap.config import BuildConfig, COLLECTIONS
+from leonmap.utils import (
     get_logger,
     resolve_device,
     load_encoder,
@@ -158,11 +158,16 @@ def main() -> None:
     # single query
     ap.add_argument("--id", default=None, help="Single concept id")
     ap.add_argument("--label", default=None, help="Single concept label")
+    ap.add_argument("--config", default=None, help="Path to YAML config override")
 
     # batch query
     ap.add_argument("--input", default=None, help="Input file with queries (TSV/CSV)")
 
     args = ap.parse_args()
+    if args.config:
+        from leonmap.config_loader import load_user_config
+        load_user_config(args.config)
+        
     cfg = BuildConfig()
     logger = get_logger("retrieve", cfg.log_dir)
 

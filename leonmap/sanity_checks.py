@@ -10,14 +10,18 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from config import BuildConfig, resolve_path
-from utils import get_logger, run_all_sanity_checks
+from leonmap.config import BuildConfig, resolve_path
+from leonmap.utils import get_logger, run_all_sanity_checks
 
 
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--collections", nargs="*", default=None)
+    ap.add_argument("--config", default=None, help="Path to YAML config override")
     args = ap.parse_args()
+    if args.config:
+        from leonmap.config_loader import load_user_config
+        load_user_config(args.config)
 
     cfg = BuildConfig()
     logger = get_logger("sanity", cfg.log_dir)

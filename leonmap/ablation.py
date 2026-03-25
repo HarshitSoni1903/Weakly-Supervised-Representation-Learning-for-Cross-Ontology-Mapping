@@ -20,8 +20,8 @@ from typing import Dict, List, Tuple
 import torch
 from tqdm import tqdm
 
-from config import BuildConfig, COLLECTIONS, ABLATIONS, resolve_path, PROJECT_ROOT
-from utils import (
+from leonmap.config import BuildConfig, COLLECTIONS, ABLATIONS, resolve_path, PROJECT_ROOT
+from leonmap.utils import (
     get_logger,
     resolve_device,
     load_encoder,
@@ -132,7 +132,7 @@ def _evaluate_direction(
                 continue
             pool.append((pid, float(s)))
 
-        # rank with shared logic — threshold=0 for ablation (we want all candidates for recall@k)
+        # rank with shared logic: threshold=0 for ablation (we want all candidates for recall@k)
         ranked = rank_pool(pool, tgt_db, src_label, threshold=0.0)
 
         total += 1
@@ -207,8 +207,13 @@ def main() -> None:
     ap.add_argument("--models", nargs="*", type=str, default=None, choices=["base", "ft"])
     ap.add_argument("--modes", nargs="*", type=str, default=None, choices=["label_only", "full_src"])
     ap.add_argument("--reverse", action="store_true", default=None, help="Also run reverse direction")
+    ap.add_argument("--config", default=None, help="Path to YAML config override")
     args = ap.parse_args()
 
+    if args.config:
+        from leonmap.config_loader import load_user_config
+        load_user_config(args.config)
+        
     if args.study not in ABLATIONS:
         raise SystemExit(f"Unknown study: {args.study}. Available: {sorted(ABLATIONS.keys())}")
 
