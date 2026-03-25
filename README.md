@@ -12,7 +12,7 @@ alignments.
 ## Project Structure
 ```
 project_root/
-├── vdb_src/
+├── leonmap/
 │   ├── config.py          # All collection definitions, ablation/mapping presets, BuildConfig (This is the primary file to change)
 │   ├── utils.py           # Embedding, FAISS I/O, OWL parsing, ranking, evaluation
 │   ├── build_vdb.py       # Build FAISS indices from OWL/CSV ontology files
@@ -74,13 +74,13 @@ in `models/sap_FT/`.
 ### 1. Build Collections
 ```bash
 # build all collections defined in config.py
-python vdb_src/build_vdb.py
+python leonmap/build_vdb.py
 
 # build specific collections
-python vdb_src/build_vdb.py --collections hp mp mesh mondo
+python leonmap/build_vdb.py --collections hp mp mesh mondo
 
 # rebuild existing (overwrites)
-python vdb_src/build_vdb.py --collections hp --rebuild
+python leonmap/build_vdb.py --collections hp --rebuild
 ```
 
 Shows a preview of sampled concepts before building. Collections are written to `db/`.
@@ -88,10 +88,10 @@ Shows a preview of sampled concepts before building. Collections are written to 
 ### 2. Sanity Checks
 ```bash
 # check all built collections
-python vdb_src/sanity_checks.py
+python leonmap/sanity_checks.py
 
 # check specific ones
-python vdb_src/sanity_checks.py --collections hp mp
+python leonmap/sanity_checks.py --collections hp mp
 ```
 
 Verifies index/metadata count consistency, embedding health (detects collapsed vectors), 
@@ -100,13 +100,13 @@ and self-retrieval (each vector should retrieve itself in top-k).
 ### 3. Run Ablation Studies
 ```bash
 # run a predefined study
-python vdb_src/ablation.py --study hp2mp
+python leonmap/ablation.py --study hp2mp
 
 # override parameters
-python vdb_src/ablation.py --study hp2mp --ks 1 50 200 --models ft --modes full_src
+python leonmap/ablation.py --study hp2mp --ks 1 50 200 --models ft --modes full_src
 
 # include reverse direction
-python vdb_src/ablation.py --study mondo2mesh --reverse
+python leonmap/ablation.py --study mondo2mesh --reverse
 ```
 
 Results go to `ablation_results/<src>_<tgt>/run_<timestamp>/`. Each run produces 
@@ -115,10 +115,10 @@ Results go to `ablation_results/<src>_<tgt>/run_<timestamp>/`. Each run produces
 ### 4. Run Full Mapping
 ```bash
 # run a predefined mapping study
-python vdb_src/mapper.py --study hp_mp
+python leonmap/mapper.py --study hp_mp
 
 # override threshold or top_k
-python vdb_src/mapper.py --study mondo_mesh --threshold 0.85 --top_k 5
+python leonmap/mapper.py --study mondo_mesh --threshold 0.85 --top_k 5
 ```
 
 Results go to `mapper_results/<study>/run_<timestamp>/`. Produces per-direction TSV files 
@@ -127,13 +127,13 @@ and a `summary.json` with evaluation metrics.
 ### 5. Ad-hoc Retrieval
 ```bash
 # query by label
-python vdb_src/retrieve.py --label "Abnormal heart morphology" --tgt mesh --top_k 5
+python leonmap/retrieve.py --label "Abnormal heart morphology" --tgt mesh --top_k 5
 
 # query by ID (enriches from source collection automatically)
-python vdb_src/retrieve.py --id "HP:0001627" --tgt mp --top_k 10
+python leonmap/retrieve.py --id "HP:0001627" --tgt mp --top_k 10
 
 # batch from file
-python vdb_src/retrieve.py --input queries.tsv --tgt mesh --top_k 50 --out results.tsv
+python leonmap/retrieve.py --input queries.tsv --tgt mesh --top_k 50 --out results.tsv
 ```
 
 ## Configuration
