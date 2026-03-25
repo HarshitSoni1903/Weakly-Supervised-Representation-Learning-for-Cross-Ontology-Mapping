@@ -199,7 +199,7 @@ Optional:
 Install the fine-tuned checkpoint to `models/sap_FT/` before building collections. 
 The base model downloads automatically from HuggingFace on first use.
 
-## Notes
+## Logic Notes
 
 ### Retrieval Pipeline
 
