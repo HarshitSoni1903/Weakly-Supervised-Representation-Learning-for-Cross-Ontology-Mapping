@@ -185,7 +185,7 @@ Requires Python 3.10+.
 ```
 torch
 transformers
-faiss-cpu          # or faiss-gpu
+faiss-cpu          # or faiss-gpu 
 numpy
 tqdm
 owlready2          # OWL parsing
