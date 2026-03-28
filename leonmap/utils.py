@@ -15,7 +15,7 @@ import torch
 import torch.nn.functional as F
 from tqdm import tqdm
 from transformers import AutoModel, AutoTokenizer
-from owlready2 import get_ontology
+from owlready2 import get_ontology, default_world
 
 from leonmap.config import BuildConfig, COLLECTIONS, resolve_path
 
@@ -304,6 +304,27 @@ def load_owl_concepts(owl_path: str, id_prefixes: Optional[List[str]] = None) ->
     if id_prefixes:
         norm_prefixes = [normalize_prefix(p) for p in id_prefixes]
 
+    DCTERMS_DESC = "http://purl.org/dc/terms/description"
+    SYN_PREDICATES = [
+        "http://www.geneontology.org/formats/oboInOwl#hasExactSynonym",
+        "http://www.geneontology.org/formats/oboInOwl#hasRelatedSynonym",
+        "http://www.geneontology.org/formats/oboInOwl#hasBroadSynonym",
+        "http://www.geneontology.org/formats/oboInOwl#hasNarrowSynonym",
+    ]
+
+    rdf_defs: Dict[str, str] = {}
+    rdf_syns: Dict[str, List[str]] = {}
+    try:
+        graph = default_world.as_rdflib_graph()
+        from rdflib import URIRef
+        for s, p, o in graph.triples((None, URIRef(DCTERMS_DESC), None)):
+            rdf_defs[str(s)] = str(o)
+        for syn_pred in SYN_PREDICATES:
+            for s, p, o in graph.triples((None, URIRef(syn_pred), None)):
+                rdf_syns.setdefault(str(s), []).append(str(o))
+    except Exception:
+        pass
+
     for cls in onto.classes():
         cid = _owl_class_id(cls)
 
@@ -312,7 +333,9 @@ def load_owl_concepts(owl_path: str, id_prefixes: Optional[List[str]] = None) ->
             continue
 
         label = _first_str(getattr(cls, "label", "")) or cid
+        iri = str(getattr(cls, "iri", "") or "")
 
+        # definition: standard OBO fields first, then dcterms fallback via RDF graph
         definition = ""
         if hasattr(cls, "IAO_0000115"):
             definition = _first_str(getattr(cls, "IAO_0000115", ""))
@@ -320,11 +343,16 @@ def load_owl_concepts(owl_path: str, id_prefixes: Optional[List[str]] = None) ->
             definition = _first_str(getattr(cls, "definition", ""))
         if not definition and hasattr(cls, "description"):
             definition = _first_str(getattr(cls, "description", ""))
+        if not definition and iri in rdf_defs:
+            definition = rdf_defs[iri]
 
+        # synonyms: standard owlready2 attrs first, then RDF graph fallback
         synonyms: List[str] = []
         for attr in _SYN_ATTRS:
             if hasattr(cls, attr):
                 synonyms.extend(_list_str(getattr(cls, attr, None)))
+        if not synonyms and iri in rdf_syns:
+            synonyms = rdf_syns[iri]
 
         # dedup preserving order
         seen = set()
@@ -341,7 +369,7 @@ def load_owl_concepts(owl_path: str, id_prefixes: Optional[List[str]] = None) ->
             "label": str(label),
             "definition": str(definition),
             "synonyms": syn2,
-            "iri": str(getattr(cls, "iri", "") or ""),
+            "iri": iri,
         })
 
     return concepts

@@ -8,7 +8,7 @@ data/
 models/
 logs/
 .DS_Store
-vdb_src/__pycache__/
+leonmap/__pycache__/
 *.pdf
 *.ipynby
 *.zip
