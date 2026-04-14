@@ -36,16 +36,17 @@ project_root/
 
 ```mermaid
 flowchart TD
+    CONFIG[Config\nconfig.py/config.yaml\nCollections\nMappings\nThreshold\nTop K\nMin Cosine\nMonitor Samples\n...]
     OWL["OWL / CSV files"] --> BUILD["build_vdb.py"]
     SAP["SapBERT (base or ft)"] --> BUILD
     BUILD --> FAISS[("FAISS collections")]
+    FAISS <-->SANITY["Sanity Checks\n(sanity_checks.py)\nVerifies: \nSelf Retirval\nEmbedding Health\nCount"]
     GOLD["Gold pairs"] -.-> MAPPER
     GOLD -.-> ABLATION
-    FAISS --> SANITY["sanity_checks.py"]
     FAISS --> MAPPER["mapper.py\nFull-corpus mapping"]
     FAISS --> ABLATION["ablation.py\nRecall@k evaluation"]
     FAISS --> RETRIEVE["retrieve.py\nAd-hoc queries"]
-    MAPPER --> OUT1["TSV + evaluation metrics"]
+    MAPPER --> OUT1["TSV + \nevaluation metrics(if gold exist)"]
     ABLATION --> OUT2["Metrics + predictions"]
     RETRIEVE --> OUT3["Console / CSV"]
 ```
