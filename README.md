@@ -31,8 +31,32 @@ project_root/
 ├── mapper_results/        # Mapper output (generated)
 └── logs/                  # Individual run logs (generated)
 ```
+## Pipeline Overview
+```mermaid
+flowchart LR
+    subgraph FT[FINE-TUNING]
+        direction LR
+        SEM[(SeMRA)] --> BASE[BASE<br/>SAPBERT]
+        BASE --> FINE[FINETUNED<br/>SAPBERT]
+    end
 
-## How It Works
+    subgraph MAP[MAPPING]
+        direction LR
+        ONT[(ONTOLOGIES)] --> VDB[(VECTOR DB)]
+        VDB --> CAND[CANDIDATE<br/>SET]
+        CAND --> BOOST[LEXICAL<br/>BOOST]
+        BOOST --> CLASSIFY[CLASSIFY<br/>MAPPINGS]
+        CLASSIFY --> OUT[SSSOM<br/>OUTPUT]
+    end
+
+    FINE --> VDB
+    style FT fill:transparent
+    style MAP fill:transparent
+    classDef default fill:#fff,stroke:#000,stroke-width:1px,color:#000
+    classDef section fill:#fff,stroke:#000,stroke-width:1px,color:#000
+```
+
+## Architecture
 
 ```mermaid
 flowchart TD
