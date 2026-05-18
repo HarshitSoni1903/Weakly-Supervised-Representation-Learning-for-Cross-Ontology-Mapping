@@ -31,6 +31,7 @@ dependencies = [
     "tqdm>=4.60",
     "owlready2>=0.40",
     "pyyaml>=6.0",
+    "rdflib>=6.0",
 ]
 
 [project.optional-dependencies]

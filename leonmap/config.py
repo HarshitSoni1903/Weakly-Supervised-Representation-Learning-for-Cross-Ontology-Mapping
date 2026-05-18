@@ -29,6 +29,7 @@ class BuildConfig:
 
     # lexical matching
     use_gilda: bool = False
+    enable_boost: bool = True  # unambiguous label match -> score 1.0 in rank_pool
 
     # logging
     log_dir: str = "logs"

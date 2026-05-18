@@ -133,8 +133,8 @@ def _evaluate_direction(
             pool.append((pid, float(s)))
 
         # rank with shared logic: threshold=0 for ablation (we want all candidates for recall@k)
-        ranked = rank_pool(pool, tgt_db, src_label, threshold=0.0)
-
+        ranked = rank_pool(pool, tgt_db, src_label, threshold=0.0, enable_boost=cfg.enable_boost)
+        
         total += 1
         for k in ks:
             top_k_list = ranked[:k]

@@ -735,6 +735,7 @@ def rank_pool(
     tgt_db: FaissCollection,
     src_label: str,
     threshold: float = 0.0,
+    enable_boost: bool = True,
 ) -> List[Tuple[str, float, str]]:
     """
     Shared ranking logic for a candidate pool.
@@ -752,14 +753,14 @@ def rank_pool(
         return []
 
     pool_ids = {pid for pid, _ in pool}
-
-    # check for unambiguous label match in pool
-    label_match_ids = set(tgt_db.exact_match_ids(src_label, []))
+    # check for unambiguous label match in pool (skipped when boost disabled)
     boost_id = None
-    if len(label_match_ids) == 1:
-        eid = next(iter(label_match_ids))
-        if eid in pool_ids:
-            boost_id = eid
+    if enable_boost:
+        label_match_ids = set(tgt_db.exact_match_ids(src_label, []))
+        if len(label_match_ids) == 1:
+            eid = next(iter(label_match_ids))
+            if eid in pool_ids:
+                boost_id = eid
 
     ranked: List[Tuple[str, float, str]] = []
     for pid, cosine in pool:
@@ -884,7 +885,7 @@ def fetch_top_k(
         seen_ids.add(pid)
 
     # rank with shared logic
-    ranked = rank_pool(pool, tgt_db, label, threshold)
+    ranked = rank_pool(pool, tgt_db, label, threshold, enable_boost=cfg.enable_boost)
 
     # enrich results
     results: List[Dict] = []

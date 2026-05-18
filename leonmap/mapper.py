@@ -100,7 +100,7 @@ def _run_one_direction(
                 pool.append((pid, float(s)))
 
             # rank with shared logic: threshold gates output
-            ranked = rank_pool(pool, tgt_db, src_label, threshold)
+            ranked = rank_pool(pool, tgt_db, src_label, threshold, enable_boost=cfg.enable_boost)
 
             matches: List[Dict] = []
             for pid, score, remarks in ranked[:top_k]:
