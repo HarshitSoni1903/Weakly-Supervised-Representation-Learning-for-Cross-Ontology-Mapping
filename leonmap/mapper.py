@@ -18,6 +18,7 @@ from typing import Dict, List, Set, Tuple
 import numpy as np
 from tqdm import tqdm
 
+from leonmap.build_vdb import build_collections
 from leonmap.config import BuildConfig, COLLECTIONS, MAPPINGS, resolve_path, set_work_dir
 from leonmap.utils import (
     get_logger,
@@ -153,6 +154,8 @@ def main() -> None:
     ap.add_argument("--batch_size", type=int, default=512)
     ap.add_argument("--config", default=None, help="Path to YAML config override")
     ap.add_argument("--work-dir", default=None, help="Root for db/, data/, models/, logs/ and results")
+    ap.add_argument("--build-missing", action="store_true", help="Build the study's collections if they are not in db/ yet")
+    ap.add_argument("--rebuild-collections", action="store_true", help="Rebuild the study's collections before mapping")
     args = ap.parse_args()
 
     if args.config:
@@ -172,6 +175,10 @@ def main() -> None:
     src_col_name = study["src_collection"]
     tgt_col_name = study["tgt_collection"]
     do_reverse = study.get("reverse", True)
+
+    if args.build_missing or args.rebuild_collections:
+        cfg.rebuild = args.rebuild_collections
+        build_collections([src_col_name, tgt_col_name], cfg, logger=logger)
 
     # load gold pairs: one src can have multiple valid targets
     gold_fwd: Dict[str, set] = {}

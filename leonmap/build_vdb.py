@@ -53,46 +53,27 @@ def _load_concepts(cfg: BuildConfig, spec: dict) -> list:
         raise ValueError(f"Unknown source type: {source}")
 
 
-def main() -> None:
-    ap = argparse.ArgumentParser(description="Build FAISS collections from ontology files.")
-    ap.add_argument("--collections", nargs="*", default=None, help="Which collections to build (default: all)")
-    ap.add_argument("--rebuild", action="store_true", help="Overwrite existing collections")
-    ap.add_argument("--monitor", type=int, default=None, help="Show N samples per ontology (overrides config)")
-    ap.add_argument("--config", default=None, help="Path to YAML config override")
-    ap.add_argument("--work-dir", default=None, help="Root for db/, data/, models/, logs/ and results")
-    args = ap.parse_args()
-
-    if args.config:
-        from leonmap.config_loader import load_user_config
-        load_user_config(args.config)
-    if args.work_dir:
-        set_work_dir(args.work_dir)
-
-    cfg = BuildConfig()
-    if args.rebuild:
-        cfg.rebuild = True
-    monitor_n = args.monitor if args.monitor is not None else cfg.monitor_samples
-
-    logger = get_logger("build_vdb", cfg.log_dir)
+def build_collections(names: list[str], cfg: BuildConfig, monitor: int = 0, logger=None) -> None:
+    """Build the named collections, skipping any already on disk unless cfg.rebuild. monitor>0 prompts first."""
+    logger = logger or get_logger("build_vdb", cfg.log_dir)
     device = resolve_device(cfg.device)
 
-    cols = args.collections or list(COLLECTIONS.keys())
-    for c in cols:
+    for c in names:
         if c not in COLLECTIONS:
             raise SystemExit(f"Unknown collection: {c}. Available: {sorted(COLLECTIONS.keys())}")
 
-    logger.info(f"Collections to build: {cols}")
-    logger.info(f"Device: {device}, rebuild={cfg.rebuild}, monitor_samples={monitor_n}")
+    logger.info(f"Collections to build: {names}")
+    logger.info(f"Device: {device}, rebuild={cfg.rebuild}, monitor_samples={monitor}")
 
     # group by model so we load each model only once
     by_model: dict[str, list[str]] = {}
-    for c in cols:
+    for c in names:
         m = COLLECTIONS[c]["model"]
         by_model.setdefault(m, []).append(c)
 
     # figure out which collections actually need building
     to_build = []
-    for c in cols:
+    for c in names:
         cdir = resolve_path(cfg.db_dir) / c
         if cdir.exists() and not cfg.rebuild:
             logger.info(f"[SKIP] {c} already exists (use --rebuild to overwrite)")
@@ -104,10 +85,10 @@ def main() -> None:
         return
 
     # preview: load each unique source, show samples, then clear memory
-    if monitor_n > 0:
+    if monitor > 0:
         unique_sources: dict[str, int] = {}  # cache_key -> concept count
         print(f"\n{'='*60}")
-        print(f"[MONITOR] Preview of source files, {monitor_n} samples each:")
+        print(f"[MONITOR] Preview of source files, {monitor} samples each:")
         for c in to_build:
             spec = COLLECTIONS[c]
             cache_key = spec.get("owl_path", "") or spec.get("csv_path", "")
@@ -115,7 +96,7 @@ def main() -> None:
                 continue
             concepts = _load_concepts(cfg, spec)
             unique_sources[cache_key] = len(concepts)
-            samples = random.sample(concepts, min(monitor_n, len(concepts)))
+            samples = random.sample(concepts, min(monitor, len(concepts)))
             print(f"\n--- {cache_key} ({len(concepts)} concepts) ---")
             for s in samples:
                 print(f"  id={s['id']}  label={s['label']}")
@@ -162,6 +143,29 @@ def main() -> None:
         owl_cache.clear()
 
     logger.info("Build complete.")
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser(description="Build FAISS collections from ontology files.")
+    ap.add_argument("--collections", nargs="*", default=None, help="Which collections to build (default: all)")
+    ap.add_argument("--rebuild", action="store_true", help="Overwrite existing collections")
+    ap.add_argument("--monitor", type=int, default=None, help="Show N samples per ontology (overrides config)")
+    ap.add_argument("--config", default=None, help="Path to YAML config override")
+    ap.add_argument("--work-dir", default=None, help="Root for db/, data/, models/, logs/ and results")
+    args = ap.parse_args()
+
+    if args.config:
+        from leonmap.config_loader import load_user_config
+        load_user_config(args.config)
+    if args.work_dir:
+        set_work_dir(args.work_dir)
+
+    cfg = BuildConfig()
+    if args.rebuild:
+        cfg.rebuild = True
+    monitor_n = args.monitor if args.monitor is not None else cfg.monitor_samples
+
+    build_collections(args.collections or list(COLLECTIONS.keys()), cfg, monitor_n)
 
 
 if __name__ == "__main__":
