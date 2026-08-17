@@ -1012,7 +1012,15 @@ def load_gold_pairs(
 # Model name resolver (base vs ft)
 
 def model_name_for(cfg: BuildConfig, model_key: str) -> str:
-    return cfg.base_model_name if model_key == "base" else cfg.ft_model_path
+    """Encoder for a model key. Fetches the ft checkpoint into ft_model_path when it is missing."""
+    if model_key == "base":
+        return cfg.base_model_name
+    path = resolve_path(cfg.ft_model_path)
+    if cfg.ft_model_repo and not (path / "config.json").exists():
+        print(f"[MODEL] fetching {cfg.ft_model_repo} -> {path}")
+        from huggingface_hub import snapshot_download
+        snapshot_download(repo_id=cfg.ft_model_repo, local_dir=str(path))
+    return cfg.ft_model_path
 
 
 def collection_name_for_model(base_name: str, model_key: str) -> str:

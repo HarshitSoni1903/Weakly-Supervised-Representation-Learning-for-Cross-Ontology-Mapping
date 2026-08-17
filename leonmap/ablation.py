@@ -20,7 +20,7 @@ from typing import Dict, List, Tuple
 import torch
 from tqdm import tqdm
 
-from leonmap.config import BuildConfig, COLLECTIONS, ABLATIONS, resolve_path, PROJECT_ROOT
+from leonmap.config import BuildConfig, COLLECTIONS, ABLATIONS, resolve_path
 from leonmap.utils import (
     get_logger,
     resolve_device,
@@ -240,7 +240,7 @@ def main() -> None:
     logger.info(f"Study: {args.study}, gold pairs: {len(gold_pairs)}, ks={ks}, models={models}, modes={modes}, reverse={do_reverse}")
 
     run_stamp = time.strftime("%Y%m%d_%H%M%S")
-    out_root = PROJECT_ROOT / "ablation_results" / f"{src_col}_{tgt_col}" / f"run_{run_stamp}"
+    out_root = resolve_path("ablation_results") / f"{src_col}_{tgt_col}" / f"run_{run_stamp}"
     out_root.mkdir(parents=True, exist_ok=True)
 
     (out_root / "run_config.json").write_text(json.dumps({

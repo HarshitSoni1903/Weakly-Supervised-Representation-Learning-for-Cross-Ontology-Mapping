@@ -7,6 +7,7 @@ Usage:
     cfg = BuildConfig()  # now has overrides applied
 
 YAML structure (include only what you want to override):
+    work_dir: "/path/to/root"   # root for db/, data/, models/, logs/, mapper_results/
     build:
       db_dir: "my_db"
       threshold: 0.85
@@ -42,10 +43,13 @@ def _validate(raw: Dict[str, Any]) -> None:
     errors: List[str] = []
 
     # check top-level keys
-    valid_top = {"build", "collections", "ablations", "mappings"}
+    valid_top = {"work_dir", "build", "collections", "ablations", "mappings"}
     unknown = set(raw.keys()) - valid_top
     if unknown:
         errors.append(f"Unknown top-level keys: {sorted(unknown)}")
+
+    if "work_dir" in raw and not isinstance(raw["work_dir"], (str, Path)):
+        errors.append("work_dir: must be a path string")
 
     # check build fields exist on BuildConfig
     for key in raw.get("build", {}):
@@ -110,6 +114,9 @@ def load_user_config(path: str | Path) -> None:
         raise ConfigError(f"Config must be a YAML dict, got {type(raw).__name__}")
 
     _validate(raw)
+
+    if "work_dir" in raw:
+        _cfg.set_work_dir(raw["work_dir"])
 
     # apply build overrides
     build_overrides = raw.get("build", {})

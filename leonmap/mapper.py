@@ -18,7 +18,7 @@ from typing import Dict, List, Set, Tuple
 import numpy as np
 from tqdm import tqdm
 
-from leonmap.config import BuildConfig, COLLECTIONS, MAPPINGS, PROJECT_ROOT, resolve_path
+from leonmap.config import BuildConfig, COLLECTIONS, MAPPINGS, resolve_path, set_work_dir
 from leonmap.utils import (
     get_logger,
     load_collection,
@@ -152,11 +152,14 @@ def main() -> None:
     ap.add_argument("--top_k", type=int, default=None, help="Override config top_k")
     ap.add_argument("--batch_size", type=int, default=512)
     ap.add_argument("--config", default=None, help="Path to YAML config override")
+    ap.add_argument("--work-dir", default=None, help="Root for db/, data/, models/, logs/ and results")
     args = ap.parse_args()
 
     if args.config:
         from leonmap.config_loader import load_user_config
         load_user_config(args.config)
+    if args.work_dir:
+        set_work_dir(args.work_dir)
     if args.study not in MAPPINGS:
         raise SystemExit(f"Unknown study: {args.study}. Available: {sorted(MAPPINGS.keys())}")
 
@@ -197,7 +200,7 @@ def main() -> None:
 
     # output directory
     run_stamp = time.strftime("%Y%m%d_%H%M%S")
-    out_dir = PROJECT_ROOT / "mapper_results" / args.study / f"run_{run_stamp}"
+    out_dir = resolve_path(cfg.results_dir) / args.study / f"run_{run_stamp}"
     out_dir.mkdir(parents=True, exist_ok=True)
 
     (out_dir / "run_config.json").write_text(json.dumps({

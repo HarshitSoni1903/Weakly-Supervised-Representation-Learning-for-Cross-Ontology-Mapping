@@ -8,9 +8,11 @@ PROJECT_ROOT: Path = Path(__file__).resolve().parent.parent
 class BuildConfig:
     db_dir: str = "db"
     data_dir: str = "data"
+    results_dir: str = "mapper_results"
 
     base_model_name: str = "cambridgeltl/SapBERT-from-PubMedBERT-fulltext"
     ft_model_path: str = "models/sap_FT"
+    ft_model_repo: str = "harshitsoni1903/sapbert-finetuned-semra"
 
     # embedding
     max_length: int = 512
@@ -41,6 +43,13 @@ def resolve_path(rel: str) -> Path:
     if p.is_absolute():
         return p
     return PROJECT_ROOT / p
+
+
+def set_work_dir(path: str | Path) -> Path:
+    """Point every relative config path at this root. Relative values resolve against the cwd."""
+    global PROJECT_ROOT
+    PROJECT_ROOT = Path(path).expanduser().resolve()
+    return PROJECT_ROOT
 
 
 # Collection definitions

@@ -13,7 +13,7 @@ import random
 import shutil
 from pathlib import Path
 
-from leonmap.config import BuildConfig, COLLECTIONS, resolve_path
+from leonmap.config import BuildConfig, COLLECTIONS, resolve_path, set_work_dir
 from leonmap.utils import (
     get_logger,
     resolve_device,
@@ -58,7 +58,15 @@ def main() -> None:
     ap.add_argument("--collections", nargs="*", default=None, help="Which collections to build (default: all)")
     ap.add_argument("--rebuild", action="store_true", help="Overwrite existing collections")
     ap.add_argument("--monitor", type=int, default=None, help="Show N samples per ontology (overrides config)")
+    ap.add_argument("--config", default=None, help="Path to YAML config override")
+    ap.add_argument("--work-dir", default=None, help="Root for db/, data/, models/, logs/ and results")
     args = ap.parse_args()
+
+    if args.config:
+        from leonmap.config_loader import load_user_config
+        load_user_config(args.config)
+    if args.work_dir:
+        set_work_dir(args.work_dir)
 
     cfg = BuildConfig()
     if args.rebuild:

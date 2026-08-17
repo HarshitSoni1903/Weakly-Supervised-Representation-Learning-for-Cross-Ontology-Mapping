@@ -17,11 +17,13 @@ Requires-Python: >=3.10
 Description-Content-Type: text/markdown
 Requires-Dist: torch>=2.0
 Requires-Dist: transformers>=4.30
+Requires-Dist: huggingface-hub>=0.23
 Requires-Dist: faiss-cpu>=1.7
 Requires-Dist: numpy>=1.24
 Requires-Dist: tqdm>=4.60
 Requires-Dist: owlready2>=0.40
 Requires-Dist: pyyaml>=6.0
+Requires-Dist: rdflib>=6.0
 Provides-Extra: preprocess
 Requires-Dist: lxml>=4.9; extra == "preprocess"
 Provides-Extra: gilda
@@ -62,21 +64,46 @@ project_root/
 ├── mapper_results/        # Mapper output (generated)
 └── logs/                  # Individual run logs (generated)
 ```
+## Pipeline Overview
+```mermaid
+flowchart LR
+    subgraph FT[FINE-TUNING]
+        direction LR
+        SEM[(SeMRA)] --> BASE[BASE<br/>SAPBERT]
+        BASE --> FINE[FINETUNED<br/>SAPBERT]
+    end
 
-## How It Works
+    subgraph MAP[MAPPING]
+        direction LR
+        ONT[(ONTOLOGIES)] --> VDB[(VECTOR DB)]
+        VDB --> CAND[CANDIDATE<br/>SET]
+        CAND --> BOOST[LEXICAL<br/>BOOST]
+        BOOST --> CLASSIFY[CLASSIFY<br/>MAPPINGS]
+        CLASSIFY --> OUT[SSSOM<br/>OUTPUT]
+    end
+
+    FINE --> VDB
+    style FT fill:transparent
+    style MAP fill:transparent
+    classDef default fill:#fff,stroke:#000,stroke-width:1px,color:#000
+    classDef section fill:#fff,stroke:#000,stroke-width:1px,color:#000
+```
+
+## Architecture
 
 ```mermaid
 flowchart TD
+    CONFIG[Config\nconfig.py/config.yaml\nCollections\nMappings\nThreshold\nTop K\nMin Cosine\nMonitor Samples\n...]
     OWL["OWL / CSV files"] --> BUILD["build_vdb.py"]
     SAP["SapBERT (base or ft)"] --> BUILD
     BUILD --> FAISS[("FAISS collections")]
+    FAISS <-->SANITY["Sanity Checks\n(sanity_checks.py)\nVerifies: \nSelf Retirval\nEmbedding Health\nCount"]
     GOLD["Gold pairs"] -.-> MAPPER
     GOLD -.-> ABLATION
-    FAISS --> SANITY["sanity_checks.py"]
     FAISS --> MAPPER["mapper.py\nFull-corpus mapping"]
     FAISS --> ABLATION["ablation.py\nRecall@k evaluation"]
     FAISS --> RETRIEVE["retrieve.py\nAd-hoc queries"]
-    MAPPER --> OUT1["TSV + evaluation metrics"]
+    MAPPER --> OUT1["TSV + \nevaluation metrics(if gold exist)"]
     ABLATION --> OUT2["Metrics + predictions"]
     RETRIEVE --> OUT3["Console / CSV"]
 ```
@@ -101,6 +128,17 @@ label match exists. The system supports two workflows:
 
 All scripts run from the project root. OWL files go in `data/`, the fine-tuned checkpoint 
 in `models/sap_FT/`.
+
+`leonmap-build` and `leonmap-map` accept `--work-dir <path>` to move that whole layout —
+`db/`, `data/`, `models/`, `logs/` and `mapper_results/` — under another root, and
+`--config <file.yaml>` to load overrides. A config may set the same root with a top-level
+`work_dir:` key; `--work-dir` wins over it. With neither, paths resolve against the project
+root as before. Absolute paths in a config are always used as given.
+
+```bash
+leonmap-build --work-dir /scratch/run1 --collections mondo mesh
+leonmap-map   --work-dir /scratch/run1 --study mondo_mesh
+```
 
 ### 1. Build Collections
 ```bash
@@ -177,8 +215,10 @@ All configuration lives in `config.py`.
 |-----------|---------|-------------|
 | `db_dir` | `db` | Directory for built FAISS collections |
 | `data_dir` | `data` | Directory for source OWL/CSV files and gold-standard pairs |
+| `results_dir` | `mapper_results` | Directory for mapper run outputs |
 | `base_model_name` | `cambridgeltl/SapBERT-from-PubMedBERT-fulltext` | Pretrained encoder |
 | `ft_model_path` | `models/sap_FT` | Fine-tuned encoder checkpoint |
+| `ft_model_repo` | `harshitsoni1903/sapbert-finetuned-semra` | Hub repo fetched into `ft_model_path` when that checkpoint is missing; `""` disables |
 | `max_length` | `512` | Tokenizer max sequence length |
 | `embed_batch_size` | `64` | Batch size for embedding |
 | `synonym_cap` | `10` | Max synonyms included in embedding text |

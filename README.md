@@ -96,6 +96,17 @@ label match exists. The system supports two workflows:
 All scripts run from the project root. OWL files go in `data/`, the fine-tuned checkpoint 
 in `models/sap_FT/`.
 
+`leonmap-build` and `leonmap-map` accept `--work-dir <path>` to move that whole layout —
+`db/`, `data/`, `models/`, `logs/` and `mapper_results/` — under another root, and
+`--config <file.yaml>` to load overrides. A config may set the same root with a top-level
+`work_dir:` key; `--work-dir` wins over it. With neither, paths resolve against the project
+root as before. Absolute paths in a config are always used as given.
+
+```bash
+leonmap-build --work-dir /scratch/run1 --collections mondo mesh
+leonmap-map   --work-dir /scratch/run1 --study mondo_mesh
+```
+
 ### 1. Build Collections
 ```bash
 # build all collections defined in config.py
@@ -171,8 +182,10 @@ All configuration lives in `config.py`.
 |-----------|---------|-------------|
 | `db_dir` | `db` | Directory for built FAISS collections |
 | `data_dir` | `data` | Directory for source OWL/CSV files and gold-standard pairs |
+| `results_dir` | `mapper_results` | Directory for mapper run outputs |
 | `base_model_name` | `cambridgeltl/SapBERT-from-PubMedBERT-fulltext` | Pretrained encoder |
 | `ft_model_path` | `models/sap_FT` | Fine-tuned encoder checkpoint |
+| `ft_model_repo` | `harshitsoni1903/sapbert-finetuned-semra` | Hub repo fetched into `ft_model_path` when that checkpoint is missing; `""` disables |
 | `max_length` | `512` | Tokenizer max sequence length |
 | `embed_batch_size` | `64` | Batch size for embedding |
 | `synonym_cap` | `10` | Max synonyms included in embedding text |
