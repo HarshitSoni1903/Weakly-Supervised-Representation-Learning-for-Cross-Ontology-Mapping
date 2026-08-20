@@ -2,9 +2,10 @@
 Build FAISS vector databases for ontology collections.
 
 Usage:
-    python build_vdb.py                                          # build all
+    python build_vdb.py --build-all                              # every collection
     python build_vdb.py --collections hp mp mesh mondo           # specific ones
     python build_vdb.py --collections hp mp --rebuild            # overwrite
+    python build_vdb.py --config run.yaml                        # what the config declares
 """
 from __future__ import annotations
 
@@ -147,7 +148,8 @@ def build_collections(names: list[str], cfg: BuildConfig, monitor: int = 0, logg
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="Build FAISS collections from ontology files.")
-    ap.add_argument("--collections", nargs="*", default=None, help="Which collections to build (default: all)")
+    ap.add_argument("--collections", nargs="*", default=None, help="Which collections to build")
+    ap.add_argument("--build-all", action="store_true", help="Build every collection in the registry")
     ap.add_argument("--rebuild", action="store_true", help="Overwrite existing collections")
     ap.add_argument("--monitor", type=int, default=None, help="Show N samples per ontology (overrides config)")
     ap.add_argument("--config", default=None, help="Path to YAML config override")
@@ -166,7 +168,11 @@ def main() -> None:
         cfg.rebuild = True
     monitor_n = args.monitor if args.monitor is not None else cfg.monitor_samples
 
-    build_collections(args.collections or declared or list(COLLECTIONS.keys()), cfg, monitor_n)
+    names = args.collections or (list(COLLECTIONS.keys()) if args.build_all else declared)
+    if not names:
+        raise SystemExit("Nothing to build. Use --collections, --config, or --build-all.")
+
+    build_collections(names, cfg, monitor_n)
 
 
 if __name__ == "__main__":

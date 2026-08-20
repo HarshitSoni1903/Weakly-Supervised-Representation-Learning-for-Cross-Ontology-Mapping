@@ -24,15 +24,39 @@ from __future__ import annotations
 
 import dataclasses
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import yaml
 
 import leonmap.config as _cfg
 
+_BUILD_OVERRIDES: Dict[str, Any] = {}
+_SUFFIX_KEYS = {".owl": "owl_path", ".tsv": "csv_path", ".csv": "csv_path"}
+
 
 class ConfigError(Exception):
     pass
+
+
+def collection_name(path: str | Path) -> str:
+    """Collection name inferred from an ontology filename."""
+    return Path(path).stem.split("_")[0].lower()
+
+
+def collection_spec(
+    path: str | Path,
+    model: str = "ft",
+    id_prefixes: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    """Collection spec for an ontology file. Source type comes from the suffix."""
+    p = Path(path)
+    key = _SUFFIX_KEYS.get(p.suffix.lower())
+    if key is None:
+        raise ConfigError(f"Cannot read {p.suffix!r}: expected one of {sorted(_SUFFIX_KEYS)}")
+    spec: Dict[str, Any] = {"source": "owl" if key == "owl_path" else "csv", "model": model, key: str(p)}
+    if id_prefixes:
+        spec["id_prefixes"] = list(id_prefixes)
+    return spec
 
 
 def _validate(raw: Dict[str, Any]) -> None:
@@ -98,6 +122,22 @@ def _validate(raw: Dict[str, Any]) -> None:
         raise ConfigError("Config validation failed:\n" + "\n".join(f"  - {e}" for e in errors))
 
 
+def _apply_build_overrides(overrides: Dict[str, Any]) -> None:
+    """Accumulate build overrides across loads. Arguments passed to BuildConfig() still win."""
+    _BUILD_OVERRIDES.update(overrides)
+    if getattr(_cfg.BuildConfig.__init__, "_patched", False):
+        return
+    original = _cfg.BuildConfig.__init__
+
+    def patched(self, _orig=original, **kwargs):
+        merged = dict(_BUILD_OVERRIDES)
+        merged.update(kwargs)
+        _orig(self, **merged)
+
+    patched._patched = True
+    _cfg.BuildConfig.__init__ = patched
+
+
 def load_user_config(path: str | Path) -> List[str]:
     """
     Load YAML config and patch config.py in place. Returns the collection names it declares.
@@ -118,17 +158,8 @@ def load_user_config(path: str | Path) -> List[str]:
     if "work_dir" in raw:
         _cfg.set_work_dir(raw["work_dir"])
 
-    # apply build overrides
-    build_overrides = raw.get("build", {})
-    if build_overrides:
-        current_defaults = {f.name: f.default for f in dataclasses.fields(_cfg.BuildConfig)}
-        current_defaults.update(build_overrides)
-        original_init = _cfg.BuildConfig.__init__
-        def patched_init(self, _overrides=current_defaults, _orig=original_init, **kwargs):
-            merged = dict(_overrides)
-            merged.update(kwargs)
-            _orig(self, **merged)
-        _cfg.BuildConfig.__init__ = patched_init
+    if raw.get("build"):
+        _apply_build_overrides(raw["build"])
 
     # merge dicts
     if "collections" in raw:

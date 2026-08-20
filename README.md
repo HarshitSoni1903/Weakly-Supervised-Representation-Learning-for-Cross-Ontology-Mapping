@@ -114,15 +114,21 @@ leonmap-map   --work-dir /scratch/run1 --study mondo_mesh
 
 ### 1. Build Collections
 ```bash
-# build all collections defined in config.py
-python leonmap/build_vdb.py
+# build every collection defined in config.py
+python leonmap/build_vdb.py --build-all
 
 # build specific collections
 python leonmap/build_vdb.py --collections hp mp mesh mondo
 
 # rebuild existing (overwrites)
 python leonmap/build_vdb.py --collections hp --rebuild
+
+# build what a config declares
+python leonmap/build_vdb.py --config run.yaml
 ```
+
+Priority: `--collections`, then `--build-all`, then a config's `collections:` section.
+Selecting nothing is an error.
 
 Shows a preview of sampled concepts before building. Collections are written to `db/`.
 
