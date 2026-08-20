@@ -102,6 +102,11 @@ in `models/sap_FT/`.
 `work_dir:` key; `--work-dir` wins over it. With neither, paths resolve against the project
 root as before. Absolute paths in a config are always used as given.
 
+When a config declares `collections:`, a bare `leonmap-build --config <file>` builds only
+those, not every collection in `config.py`. Explicit `--collections` still takes priority,
+and a config without a `collections:` section leaves the default (build everything)
+unchanged.
+
 ```bash
 leonmap-build --work-dir /scratch/run1 --collections mondo mesh
 leonmap-map   --work-dir /scratch/run1 --study mondo_mesh

@@ -98,9 +98,9 @@ def _validate(raw: Dict[str, Any]) -> None:
         raise ConfigError("Config validation failed:\n" + "\n".join(f"  - {e}" for e in errors))
 
 
-def load_user_config(path: str | Path) -> None:
+def load_user_config(path: str | Path) -> List[str]:
     """
-    Load YAML config and patch config.py in place.
+    Load YAML config and patch config.py in place. Returns the collection names it declares.
     Validates cross-references before applying anything.
     """
     path = Path(path)
@@ -137,3 +137,5 @@ def load_user_config(path: str | Path) -> None:
         _cfg.ABLATIONS.update(raw["ablations"])
     if "mappings" in raw:
         _cfg.MAPPINGS.update(raw["mappings"])
+
+    return list(raw.get("collections", {}))

@@ -154,9 +154,10 @@ def main() -> None:
     ap.add_argument("--work-dir", default=None, help="Root for db/, data/, models/, logs/ and results")
     args = ap.parse_args()
 
+    declared: list[str] = []
     if args.config:
         from leonmap.config_loader import load_user_config
-        load_user_config(args.config)
+        declared = load_user_config(args.config)
     if args.work_dir:
         set_work_dir(args.work_dir)
 
@@ -165,7 +166,7 @@ def main() -> None:
         cfg.rebuild = True
     monitor_n = args.monitor if args.monitor is not None else cfg.monitor_samples
 
-    build_collections(args.collections or list(COLLECTIONS.keys()), cfg, monitor_n)
+    build_collections(args.collections or declared or list(COLLECTIONS.keys()), cfg, monitor_n)
 
 
 if __name__ == "__main__":
