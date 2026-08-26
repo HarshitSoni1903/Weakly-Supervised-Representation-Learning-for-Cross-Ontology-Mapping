@@ -411,9 +411,11 @@ class FaissCollection:
         self.cdir = cdir
         self._use_gilda = use_gilda
         self.index = faiss.read_index(str(cdir / "index.faiss"))
-        # try GPU for faster search, fall back silently
+        # GPU indexes do not implement reconstruct, so the CPU index serves it.
+        self._cpu_index = self.index
+        # try CUDA for faster search, fall back silently.
         try:
-            if hasattr(faiss, 'get_num_gpus') and faiss.get_num_gpus() > 0:
+            if torch.cuda.is_available() and faiss.get_num_gpus() > 0:
                 res = faiss.StandardGpuResources()
                 self.index = faiss.index_cpu_to_gpu(res, 0, self.index)
         except Exception:
@@ -516,7 +518,7 @@ class FaissCollection:
         return scores[0], idxs[0]
 
     def reconstruct(self, pos: int) -> np.ndarray:
-        return self.index.reconstruct(pos)
+        return self._cpu_index.reconstruct(pos)
 
     def id_at_pos(self, pos: int) -> str:
         if pos < 0 or pos >= len(self.pos2id):
