@@ -96,16 +96,10 @@ label match exists. The system supports two workflows:
 All scripts run from the project root. OWL files go in `data/`, the fine-tuned checkpoint 
 in `models/sap_FT/`.
 
-`leonmap-build` and `leonmap-map` accept `--work-dir <path>` to move that whole layout —
-`db/`, `data/`, `models/`, `logs/` and `mapper_results/` — under another root, and
-`--config <file.yaml>` to load overrides. A config may set the same root with a top-level
-`work_dir:` key; `--work-dir` wins over it. With neither, paths resolve against the project
-root as before. Absolute paths in a config are always used as given.
-
-When a config declares `collections:`, a bare `leonmap-build --config <file>` builds only
-those, not every collection in `config.py`. Explicit `--collections` still takes priority,
-and a config without a `collections:` section leaves the default (build everything)
-unchanged.
+`--work-dir <path>` moves `db/`, `data/`, `models/`, `logs/` and `mapper_results/` under
+another root. `--config <file.yaml>` loads overrides and may set the same root with a
+top-level `work_dir:` key. `--work-dir` takes priority. Absolute paths in a config are used
+as given.
 
 ```bash
 leonmap-build --work-dir /scratch/run1 --collections mondo mesh
@@ -166,10 +160,33 @@ python leonmap/mapper.py --study hp_mp
 
 # override threshold or top_k
 python leonmap/mapper.py --study mondo_mesh --threshold 0.85 --top_k 5
+
+# map two files directly, names inferred from filenames
+leonmap-map --source mondo.owl --target mesh.owl \
+            --src-prefix MONDO_ --tgt-prefix mesh_ \
+            --build-missing --out predictions.tsv
+
+# name the collections explicitly and map both directions
+leonmap-map --source a.owl --target b.owl --src-prefix A_ --tgt-prefix B_ \
+            --src-name a --tgt-name b --reverse
+
+# build the study's collections first if they are missing
+leonmap-map --study mondo_mesh --build-missing
+
+# re-embed the study's collections before mapping
+leonmap-map --study mondo_mesh --rebuild-collections
 ```
 
 Results go to `mapper_results/<study>/run_<timestamp>/`. Produces per-direction TSV files 
 and a `summary.json` with evaluation metrics.
+
+`--src-prefix` and `--tgt-prefix` are optional. Without them every concept in the file is
+indexed and mapped, imports included, and a warning is printed. Prefixes filter both sides
+at map time, so they apply even to a collection built without them.
+
+Each collection directory holds a `spec.json` of the spec it was built from. Reusing a
+collection whose spec has changed prints the stored spec, the requested spec, and the
+fields that differ. Pass `--rebuild-collections` to re-embed it.
 
 ### 5. Ad-hoc Retrieval
 ```bash

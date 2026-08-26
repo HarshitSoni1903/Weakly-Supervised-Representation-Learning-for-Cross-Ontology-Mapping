@@ -25,6 +25,7 @@ from leonmap.utils import (
     write_collection,
     run_all_sanity_checks,
     model_name_for,
+    warn_spec_drift,
 )
 
 
@@ -77,6 +78,7 @@ def build_collections(names: list[str], cfg: BuildConfig, monitor: int = 0, logg
     for c in names:
         cdir = resolve_path(cfg.db_dir) / c
         if cdir.exists() and not cfg.rebuild:
+            warn_spec_drift(cdir, c, logger)
             logger.info(f"[SKIP] {c} already exists (use --rebuild to overwrite)")
         else:
             to_build.append(c)

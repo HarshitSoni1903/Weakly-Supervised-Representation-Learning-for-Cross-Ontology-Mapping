@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
 import time
 from pathlib import Path
 from typing import Dict, List, Set, Tuple
@@ -20,6 +21,7 @@ from tqdm import tqdm
 
 from leonmap.build_vdb import build_collections
 from leonmap.config import BuildConfig, COLLECTIONS, MAPPINGS, resolve_path, set_work_dir
+from leonmap.config_loader import ConfigError, collection_name, collection_spec
 from leonmap.utils import (
     get_logger,
     load_collection,
@@ -51,12 +53,15 @@ def _run_one_direction(
     src_db = load_collection(cfg, src_name)
     tgt_db = load_collection(cfg, tgt_name)
 
-    # prefix filter
-    spec = COLLECTIONS.get(tgt_name, {})
-    raw_prefixes = spec.get("id_prefixes") or []
-    if isinstance(raw_prefixes, str):
-        raw_prefixes = [raw_prefixes]
-    norm_prefixes = [normalize_prefix(p) for p in raw_prefixes]
+    # prefix filter, applied to both sides regardless of how the index was built
+    def _prefixes_of(name: str) -> List[str]:
+        raw = COLLECTIONS.get(name, {}).get("id_prefixes") or []
+        if isinstance(raw, str):
+            raw = [raw]
+        return [normalize_prefix(p) for p in raw]
+
+    src_prefixes = _prefixes_of(src_name)
+    norm_prefixes = _prefixes_of(tgt_name)
 
     def ok_prefix(pid: str) -> bool:
         if not norm_prefixes:
@@ -81,6 +86,8 @@ def _run_one_direction(
             pos = batch_start + local_i
             src_id = src_db.id_at_pos(pos)
             if not src_id:
+                continue
+            if src_prefixes and not any(src_id.startswith(p) for p in src_prefixes):
                 continue
 
             src_meta = src_db.get_payload_by_id(src_id) or {}
@@ -148,7 +155,15 @@ def _run_one_direction(
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="Run full ontology mapping from config presets.")
-    ap.add_argument("--study", required=True, help=f"Study key from MAPPINGS. Available: {sorted(MAPPINGS.keys())}")
+    ap.add_argument("--study", default=None, help=f"Study key from MAPPINGS. Available: {sorted(MAPPINGS.keys())}")
+    ap.add_argument("--source", default=None, help="Source ontology file (.owl, .tsv, .csv)")
+    ap.add_argument("--target", default=None, help="Target ontology file (.owl, .tsv, .csv)")
+    ap.add_argument("--src-prefix", nargs="+", default=None, help="Id prefixes of the source, e.g. MONDO_")
+    ap.add_argument("--tgt-prefix", nargs="+", default=None, help="Id prefixes of the target, e.g. mesh_")
+    ap.add_argument("--src-name", default=None, help="Source collection name (default: from the filename)")
+    ap.add_argument("--tgt-name", default=None, help="Target collection name (default: from the filename)")
+    ap.add_argument("--out", default=None, help="Copy the forward predictions TSV here")
+    ap.add_argument("--reverse", action="store_true", help="Also map target to source")
     ap.add_argument("--threshold", type=float, default=None, help="Override config threshold")
     ap.add_argument("--top_k", type=int, default=None, help="Override config top_k")
     ap.add_argument("--batch_size", type=int, default=512)
@@ -163,6 +178,24 @@ def main() -> None:
         load_user_config(args.config)
     if args.work_dir:
         set_work_dir(args.work_dir)
+
+    if bool(args.source) != bool(args.target):
+        raise SystemExit("--source and --target must be given together.")
+    if args.source:
+        if not (args.src_prefix and args.tgt_prefix):
+            print("[WARN] no id prefix given: every concept in the file is indexed and mapped, imports included")
+        src = args.src_name or collection_name(args.source)
+        tgt = args.tgt_name or collection_name(args.target)
+        try:
+            COLLECTIONS[src] = collection_spec(args.source, id_prefixes=args.src_prefix)
+            COLLECTIONS[tgt] = collection_spec(args.target, id_prefixes=args.tgt_prefix)
+        except ConfigError as e:
+            raise SystemExit(str(e))
+        args.study = args.study or f"{src}_{tgt}"
+        MAPPINGS[args.study] = {"src_collection": src, "tgt_collection": tgt, "reverse": args.reverse}
+    elif not args.study:
+        raise SystemExit("Pass --study, or --source and --target.")
+
     if args.study not in MAPPINGS:
         raise SystemExit(f"Unknown study: {args.study}. Available: {sorted(MAPPINGS.keys())}")
 
@@ -226,6 +259,12 @@ def main() -> None:
         gold_fwd, fwd_path, logger,
     )
     results.append(fwd_metrics)
+
+    if args.out:
+        out_file = Path(args.out)
+        out_file.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(fwd_path, out_file)
+        logger.info(f"Predictions copied to {out_file}")
 
     # reverse
     if do_reverse:

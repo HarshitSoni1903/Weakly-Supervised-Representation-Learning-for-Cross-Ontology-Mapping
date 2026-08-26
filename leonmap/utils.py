@@ -524,10 +524,33 @@ class FaissCollection:
         return self.pos2id[pos]
 
 
+_DRIFT_WARNED: set = set()
+
+
+def warn_spec_drift(cdir: Path, name: str, logger: Optional[logging.Logger] = None) -> None:
+    """Warn once per collection when its stored spec differs from the registered one."""
+    stored_path = cdir / "spec.json"
+    if not stored_path.exists() or str(cdir) in _DRIFT_WARNED:
+        return
+    _DRIFT_WARNED.add(str(cdir))
+    stored = json.loads(stored_path.read_text(encoding="utf-8"))
+    current = COLLECTIONS.get(name, {})
+    changed = sorted(k for k in set(stored) | set(current) if stored.get(k) != current.get(k))
+    if changed:
+        msg = (
+            f"[DRIFT] collection '{name}' differs from the spec it was built with: {', '.join(changed)}\n"
+            f"    built with: {json.dumps(stored)}\n"
+            f"    requested : {json.dumps(current)}\n"
+            f"    the existing index is used as is; pass --rebuild-collections to re-embed {name}"
+        )
+        logger.warning(msg) if logger else print(msg)
+
+
 def load_collection(cfg: BuildConfig, name: str) -> FaissCollection:
     cdir = resolve_path(cfg.db_dir) / name
     if not cdir.exists():
         raise SystemExit(f"Missing collection dir: {cdir}")
+    warn_spec_drift(cdir, name)
     return FaissCollection(cdir, use_gilda=cfg.use_gilda)
 
 
@@ -577,6 +600,7 @@ def write_collection(
 
     (cdir / "id2pos.json").write_text(json.dumps(id2pos), encoding="utf-8")
     (cdir / "label2pos.json").write_text(json.dumps(label2pos), encoding="utf-8")
+    (cdir / "spec.json").write_text(json.dumps(COLLECTIONS.get(collection, {}), indent=2), encoding="utf-8")
 
     msg = f"[BUILD] {collection}: n={len(concepts)} dim={dim}"
     if logger:
