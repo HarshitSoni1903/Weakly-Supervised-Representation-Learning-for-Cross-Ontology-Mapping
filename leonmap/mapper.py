@@ -223,8 +223,11 @@ def main() -> None:
             raw_pairs = load_gold_pairs(gold_path, src_col=study.get("src_col"), tgt_col=study.get("tgt_col"))
             logger.info(f"Gold pairs loaded: {len(raw_pairs)} ({len(set(raw_pairs))} unique)")
 
-            src_prefix = normalize_prefix(COLLECTIONS[src_col_name]["id_prefixes"][0])
-            tgt_prefix = normalize_prefix(COLLECTIONS[tgt_col_name]["id_prefixes"][0])
+            # collections without id_prefixes match everything, so pairs keep their given order
+            src_raw = COLLECTIONS.get(src_col_name, {}).get("id_prefixes") or [""]
+            tgt_raw = COLLECTIONS.get(tgt_col_name, {}).get("id_prefixes") or [""]
+            src_prefix = normalize_prefix(src_raw[0]) if src_raw[0] else ""
+            tgt_prefix = normalize_prefix(tgt_raw[0]) if tgt_raw[0] else ""
 
             for a, b in raw_pairs:
                 if a.startswith(src_prefix) and b.startswith(tgt_prefix):

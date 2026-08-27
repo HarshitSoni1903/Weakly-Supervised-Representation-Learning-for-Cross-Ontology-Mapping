@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import random
 import shutil
+import sys
 from pathlib import Path
 
 from leonmap.config import BuildConfig, COLLECTIONS, resolve_path, set_work_dir
@@ -109,10 +110,13 @@ def build_collections(names: list[str], cfg: BuildConfig, monitor: int = 0, logg
                     print(f"    syns={s['synonyms'][:5]}")
             del concepts  # free immediately
         print(f"\n{'='*60}")
-        resp = input("Proceed with building all? [y/n]: ").strip().lower()
-        if resp not in ("y", "yes", ""):
-            logger.info("User declined. Exiting.")
-            return
+        if not sys.stdin.isatty():
+            logger.info("No terminal attached, proceeding without confirmation.")
+        else:
+            resp = input("Proceed with building all? [y/n]: ").strip().lower()
+            if resp not in ("y", "yes", ""):
+                logger.info("User declined. Exiting.")
+                return
 
     # build: reload source files as needed, cache within each model group
     for model_key, col_names in by_model.items():
