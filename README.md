@@ -1,7 +1,7 @@
 # Ontology Mapping via Semantic Retrieval
 
 Cross-ontology concept mapping using fine-tuned SapBERT embeddings and FAISS similarity search. 
-Given a source ontology (e.g., HPO) and a target ontology (e.g., MPO), the system identifies 
+Given a source ontology (e.g., HPO, human phenotype) and a target ontology (e.g., MPO, mammal phenotype), the system identifies 
 the best-matching target concept for every source concept based on semantic similarity of 
 labels, definitions, and synonyms.
 
